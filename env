@@ -2,14 +2,7 @@
 NODE_ENV=development
 PORT=5001
 
-# Database — PostgreSQL
-# Option A: individual variables (local dev)
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=jibam_pharmacy
-DB_USER=postgres
-DB_PASSWORD=
-DB_SSL=false
+
 
 # Option B: full connection URL (Neon)
 DATABASE_URL=postgresql://neondb_owner:npg_sgzWBdNU51tq@ep-curly-recipe-avmhi5gz-pooler.c-11.us-east-1.aws.neon.tech/neondb?sslmode=require
