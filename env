@@ -11,8 +11,8 @@ DB_USER=postgres
 DB_PASSWORD=
 DB_SSL=false
 
-# Option B: full connection URL (Railway / Render / Neon / Supabase)
-# DATABASE_URL=postgresql://user:password@host:5432/jibam_pharmacy?sslmode=require
+# Option B: full connection URL (Neon)
+DATABASE_URL=postgresql://neondb_owner:npg_sgzWBdNU51tq@ep-curly-recipe-avmhi5gz-pooler.c-11.us-east-1.aws.neon.tech/neondb?sslmode=require
 
 # JWT
 JWT_SECRET=your_super_secret_jwt_key_here_min_32_chars
