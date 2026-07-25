@@ -89,6 +89,22 @@ app.use(morgan(isProduction ? 'combined' : 'dev'));
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 app.use('/api', generalLimiter);
 
+// ─── Ensure DB Connection (for Vercel serverless) ─────────────────────────────
+app.use(async (req, res, next) => {
+  if (process.env.VERCEL === '1') {
+    try {
+      await ensureDB();
+    } catch (err) {
+      return res.status(503).json({
+        status: 'error',
+        message: 'Database connection failed',
+        error: err.message,
+      });
+    }
+  }
+  next();
+});
+
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/health', async (req, res) => {
   try {
@@ -133,16 +149,23 @@ app.use(errorHandler);
 let dbReady = false;
 const ensureDB = async () => {
   if (dbReady) return;
-  await sequelize.authenticate();
-  dbReady = true;
-  console.log('✅ DB connected');
+  try {
+    await sequelize.authenticate();
+    dbReady = true;
+    console.log('✅ DB connected');
+  } catch (err) {
+    console.error('DB connect error:', err.message);
+    throw err;
+  }
 };
-
-// Warm up DB on module load (helps with Vercel cold starts)
-ensureDB().catch((err) => console.error('DB connect error:', err.message));
 
 // ─── Local dev server (NOT used by Vercel) ────────────────────────────────────
 if (process.env.VERCEL !== '1' && process.env.NODE_ENV !== 'production') {
+  // Connect DB immediately for local dev
+  ensureDB().catch(() => {
+    console.error('Failed to connect to database. Check your DATABASE_URL.');
+  });
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Jibam Pharmacy API → http://localhost:${PORT}`);
     console.log(`🌐 Health → http://localhost:${PORT}/health\n`);
