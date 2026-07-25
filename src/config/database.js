@@ -1,5 +1,6 @@
 import { Sequelize } from 'sequelize';
 import dotenv from 'dotenv';
+import pg from 'pg';
 
 dotenv.config();
 
@@ -8,6 +9,7 @@ dotenv.config();
 const sequelize = process.env.DATABASE_URL
   ? new Sequelize(process.env.DATABASE_URL, {
       dialect: 'postgres',
+      dialectModule: pg,
       protocol: 'postgres',
       dialectOptions: {
         ssl: process.env.NODE_ENV === 'production'
@@ -26,6 +28,7 @@ const sequelize = process.env.DATABASE_URL
         host: process.env.DB_HOST,
         port: parseInt(process.env.DB_PORT) || 5432,
         dialect: 'postgres',
+        dialectModule: pg,
         dialectOptions: {
           ssl: process.env.NODE_ENV === 'production'
             ? { require: true, rejectUnauthorized: false }
