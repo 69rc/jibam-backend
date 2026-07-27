@@ -252,11 +252,13 @@ export const updateProduct = async (req, res, next) => {
       }
     }
 
-    // Handle primary image upload
+    // Handle primary image upload - only update if new image is provided
     if (req.files?.['image']?.[0]) {
       updateData.image = req.files['image'][0].path;
       updateData.imagePublicId = req.files['image'][0].filename;
     }
+    // If no new image is uploaded, don't update the image field at all
+    // This preserves the existing image
 
     console.log('Attempting to update product with data:', updateData);
 
