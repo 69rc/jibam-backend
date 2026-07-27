@@ -3,9 +3,6 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 
 dotenv.config();
-import multer from 'multer';
-
-dotenv.config();
 
 // Initialize Supabase client for Storage (separate from Neon DB)
 const supabaseUrl = process.env.SUPABASE_URL;
