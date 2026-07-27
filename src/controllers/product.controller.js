@@ -237,9 +237,22 @@ export const updateProduct = async (req, res, next) => {
 
     const updateData = {};
     for (const field of allowedFields) {
-      if (req.body[field] !== undefined) updateData[field] = req.body[field];
+      if (req.body[field] !== undefined) {
+        // Handle boolean conversions
+        if (field === 'prescriptionRequired' || field === 'isFeatured' || 
+            field === 'isNewArrival' || field === 'isBestSeller' || field === 'isActive') {
+          updateData[field] = req.body[field] === 'true' || req.body[field] === true;
+        } else if (field === 'price' || field === 'comparePrice' || field === 'stock') {
+          updateData[field] = parseFloat(req.body[field]);
+        } else if (field === 'tags' && typeof req.body[field] === 'string') {
+          updateData[field] = JSON.parse(req.body[field]);
+        } else {
+          updateData[field] = req.body[field];
+        }
+      }
     }
 
+    // Handle primary image upload
     if (req.files?.['image']?.[0]) {
       updateData.image = req.files['image'][0].path;
       updateData.imagePublicId = req.files['image'][0].filename;
@@ -249,6 +262,7 @@ export const updateProduct = async (req, res, next) => {
 
     return successResponse(res, product, 'Product updated');
   } catch (error) {
+    console.error('Product update error:', error);
     next(error);
   }
 };
