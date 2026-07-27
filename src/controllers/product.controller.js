@@ -225,14 +225,18 @@ export const createProduct = async (req, res, next) => {
 // PUT /products/:id (admin)
 export const updateProduct = async (req, res, next) => {
   try {
-    console.log('Product update request:', {
+    console.log('Product update request started:', {
       id: req.params.id,
-      body: req.body,
-      files: req.files
+      hasBody: !!req.body,
+      hasFiles: !!req.files,
+      contentType: req.headers['content-type']
     });
 
     const product = await Product.findByPk(req.params.id);
-    if (!product) return errorResponse(res, 'Product not found', 404);
+    if (!product) {
+      console.log('Product not found:', req.params.id);
+      return errorResponse(res, 'Product not found', 404);
+    }
 
     const allowedFields = [
       'categoryId', 'name', 'description', 'manufacturer', 'dosage',
@@ -254,13 +258,34 @@ export const updateProduct = async (req, res, next) => {
       updateData.imagePublicId = req.files['image'][0].filename;
     }
 
-    console.log('Update data:', updateData);
+    console.log('Attempting to update product with data:', updateData);
 
-    await product.update(updateData);
+    const updatedProduct = await product.update(updateData);
+
+    console.log('Product updated successfully:', updatedProduct.id);
 
     return successResponse(res, product, 'Product updated');
   } catch (error) {
-    console.error('Product update error:', error);
+    console.error('Product update error caught:', {
+      error: error,
+      message: error?.message,
+      name: error?.name,
+      stack: error?.stack,
+      reqBody: req.body,
+      reqFiles: req.files
+    });
+    
+    // Create a proper error object if it's malformed
+    if (!error || typeof error !== 'object') {
+      const fallbackError = new Error('Unknown error occurred during product update');
+      fallbackError.statusCode = 500;
+      return next(fallbackError);
+    }
+    
+    // Ensure error has required properties
+    if (!error.message) error.message = 'Product update failed';
+    if (!error.statusCode) error.statusCode = 500;
+    
     next(error);
   }
 };

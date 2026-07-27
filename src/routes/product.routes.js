@@ -61,8 +61,10 @@ const uploadFields = uploadProductImages.fields([
   { name: 'image', maxCount: 1 },
   { name: 'images', maxCount: 4 },
 ]);
+
+// Temporarily disable file upload for update to test if that's the issue
 router.post('/', protect, restrictTo('admin'), uploadFields, handleMulterError, normalizeFormData, createProductValidator, validate, createProduct);
-router.put('/:id', protect, restrictTo('admin'), uploadFields, handleMulterError, normalizeFormData, updateProductValidator, validate, updateProduct);
+router.put('/:id', protect, restrictTo('admin'), normalizeFormData, updateProductValidator, validate, updateProduct);
 router.delete('/:id', protect, restrictTo('admin'), deleteProduct);
 
 export default router;
