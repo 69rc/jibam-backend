@@ -7,7 +7,7 @@ import {
   getPagination,
   getPaginationMeta,
 } from '../utils/apiResponse.js';
-import { getPublicImageUrl, uploadToSupabase, deleteFromSupabase } from '../config/cloudinary.js';
+import { deleteImage } from '../config/cloudinary.js';
 
 // GET /products — with filters, search, pagination
 export const getProducts = async (req, res, next) => {
@@ -172,16 +172,10 @@ export const createProduct = async (req, res, next) => {
     const category = await Category.findByPk(categoryId);
     if (!category) return errorResponse(res, 'Category not found', 404);
 
-    // Handle primary image - upload to Supabase Storage
+    // Handle primary image
     const primaryImage = req.files?.['image']?.[0];
-    let image = null;
-    let imagePublicId = null;
-
-    if (primaryImage) {
-      const uploadResult = await uploadToSupabase(primaryImage);
-      image = uploadResult.url;
-      imagePublicId = uploadResult.publicId;
-    }
+    const image = primaryImage ? primaryImage.path : null;
+    const imagePublicId = primaryImage ? primaryImage.filename : null;
 
     const product = await Product.create({
       categoryId,
@@ -206,18 +200,13 @@ export const createProduct = async (req, res, next) => {
     // Handle additional images
     const additionalImages = req.files?.['images'] || [];
     if (additionalImages.length > 0) {
-      const imageRecords = [];
-      for (let i = 0; i < additionalImages.length; i++) {
-        const file = additionalImages[i];
-        const uploadResult = await uploadToSupabase(file);
-        imageRecords.push({
-          productId: product.id,
-          url: uploadResult.url,
-          publicId: uploadResult.publicId,
-          isPrimary: i === 0 && !primaryImage,
-          sortOrder: i,
-        });
-      }
+      const imageRecords = additionalImages.map((file, index) => ({
+        productId: product.id,
+        url: file.path,
+        publicId: file.filename,
+        isPrimary: index === 0 && !primaryImage,
+        sortOrder: index,
+      }));
       await ProductImage.bulkCreate(imageRecords);
     }
 
@@ -270,16 +259,15 @@ export const updateProduct = async (req, res, next) => {
     if (req.files?.['image']?.[0]) {
       console.log('New image file detected:', req.files['image'][0].originalname);
       
-      // Delete old image from Supabase if exists
+      // Delete old image from Cloudinary if exists
       if (product.imagePublicId) {
-        await deleteFromSupabase(product.imagePublicId);
+        await deleteImage(product.imagePublicId);
       }
       
-      // Upload new image to Supabase
+      // Upload new image (Cloudinary handles this automatically)
       const newImage = req.files['image'][0];
-      const uploadResult = await uploadToSupabase(newImage);
-      updateData.image = uploadResult.url;
-      updateData.imagePublicId = uploadResult.publicId;
+      updateData.image = newImage.path;
+      updateData.imagePublicId = newImage.filename;
     } else {
       console.log('No new image file detected, preserving existing image');
     }
@@ -324,19 +312,19 @@ export const deleteProduct = async (req, res, next) => {
     const product = await Product.findByPk(req.params.id);
     if (!product) return errorResponse(res, 'Product not found', 404);
 
-    // Delete primary image from Supabase Storage
+    // Delete primary image from Cloudinary
     if (product.imagePublicId) {
-      await deleteFromSupabase(product.imagePublicId);
+      await deleteImage(product.imagePublicId);
     }
 
-    // Delete additional images from Supabase Storage
+    // Delete additional images from Cloudinary
     const productImages = await ProductImage.findAll({
       where: { productId: product.id }
     });
     
     for (const image of productImages) {
       if (image.publicId) {
-        await deleteFromSupabase(image.publicId);
+        await deleteImage(image.publicId);
       }
     }
 
