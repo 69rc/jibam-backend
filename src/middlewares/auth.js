@@ -14,6 +14,13 @@ export const protect = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
+    
+    // Check if JWT secrets are configured
+    if (!process.env.JWT_SECRET) {
+      console.error('JWT_SECRET is not configured');
+      return errorResponse(res, 'Server configuration error', 500);
+    }
+    
     const decoded = verifyAccessToken(token);
 
     const user = await User.findByPk(decoded.id, {
@@ -31,11 +38,15 @@ export const protect = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
+    console.error('Auth middleware error:', error);
     if (error.name === 'TokenExpiredError') {
       return errorResponse(res, 'Token expired. Please refresh your token.', 401);
     }
     if (error.name === 'JsonWebTokenError') {
       return errorResponse(res, 'Invalid token.', 401);
+    }
+    if (error.message === 'secretOrPrivateKey must have a value') {
+      return errorResponse(res, 'Server configuration error: JWT secrets not set', 500);
     }
     return errorResponse(res, 'Authentication failed.', 401);
   }

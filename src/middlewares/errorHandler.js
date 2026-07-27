@@ -61,10 +61,16 @@ export const errorHandler = (err, req, res, next) => {
     message = 'Token expired';
   }
 
-  // Log error in development
-  if (process.env.NODE_ENV === 'development') {
-    console.error('❌ Error:', err);
-  }
+  // Log error in development and production for debugging
+  console.error('❌ Error:', {
+    name: err.name,
+    message: err.message,
+    statusCode,
+    stack: err.stack,
+    // Log additional error details if available
+    ...(err.errors && { validationErrors: err.errors }),
+    ...(err.code && { code: err.code }),
+  });
 
   return res.status(statusCode).json({
     success: false,
