@@ -4,6 +4,11 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import { generalLimiter } from './middlewares/rateLimiter.js';
 import { errorHandler, notFound } from './middlewares/errorHandler.js';
@@ -98,6 +103,9 @@ app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan(isProduction ? 'combined' : 'dev'));
+
+// Serve static files (uploaded images)
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 app.use('/api', generalLimiter);

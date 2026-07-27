@@ -1,48 +1,28 @@
-import { v2 as cloudinary } from 'cloudinary';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import multer from 'multer';
-import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// Validate Cloudinary configuration
-if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-  console.warn('⚠️ Cloudinary configuration missing. File uploads may fail.');
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, '../../uploads/products');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-// Storage for product images
-const productStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'jibam-pharmacy/products',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-    transformation: [{ width: 800, height: 800, crop: 'limit', quality: 'auto' }],
+// Simple local storage - no compression, no Cloudinary
+const localStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
   },
-});
-
-// Storage for prescription uploads
-const prescriptionStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'jibam-pharmacy/prescriptions',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'pdf'],
-  },
-});
-
-// Storage for user avatars
-const avatarStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'jibam-pharmacy/avatars',
-    allowed_formats: ['jpg', 'jpeg', 'png'],
-    transformation: [{ width: 200, height: 200, crop: 'fill', quality: 'auto' }],
-  },
+  filename: (req, file, cb) => {
+    // Generate unique filename
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
+  }
 });
 
 const fileFilter = (req, file, cb) => {
@@ -60,32 +40,48 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
+// Export local storage variants
 export const uploadProductImages = multer({
-  storage: productStorage,
+  storage: localStorage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024, files: 5 }, // 5MB per file, max 5 files
+  limits: { fileSize: 10 * 1024 * 1024, files: 5 }, // 10MB per file, max 5 files
 });
 
 export const uploadPrescription = multer({
-  storage: prescriptionStorage,
+  storage: localStorage,
   fileFilter,
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
 export const uploadAvatar = multer({
-  storage: avatarStorage,
+  storage: localStorage,
   fileFilter,
-  limits: { fileSize: 2 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 },
 });
 
-export const deleteImage = async (publicId) => {
+// Simple delete function
+export const deleteImage = async (filename) => {
   try {
-    const result = await cloudinary.uploader.destroy(publicId);
-    return result;
+    const filePath = path.join(uploadsDir, filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log('Image deleted:', filename);
+    }
   } catch (error) {
-    console.error('Cloudinary delete error:', error);
+    console.error('Image delete error:', error);
     throw error;
   }
 };
 
-export default cloudinary;
+// Helper to get public URL for uploaded files
+export const getPublicImageUrl = (filename) => {
+  return `/uploads/products/${filename}`;
+};
+
+// Keep Cloudinary exports for backward compatibility
+export default {
+  config: () => ({ /* no-op */ }),
+  uploader: {
+    destroy: () => Promise.resolve({ result: 'ok' })
+  }
+};

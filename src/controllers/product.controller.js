@@ -7,6 +7,7 @@ import {
   getPagination,
   getPaginationMeta,
 } from '../utils/apiResponse.js';
+import { getPublicImageUrl } from '../config/cloudinary.js';
 
 // GET /products — with filters, search, pagination
 export const getProducts = async (req, res, next) => {
@@ -171,9 +172,9 @@ export const createProduct = async (req, res, next) => {
     const category = await Category.findByPk(categoryId);
     if (!category) return errorResponse(res, 'Category not found', 404);
 
-    // Handle primary image
+    // Handle primary image - now using local storage
     const primaryImage = req.files?.['image']?.[0];
-    const image = primaryImage ? primaryImage.path : null;
+    const image = primaryImage ? getPublicImageUrl(primaryImage.filename) : null;
     const imagePublicId = primaryImage ? primaryImage.filename : null;
 
     const product = await Product.create({
@@ -201,7 +202,7 @@ export const createProduct = async (req, res, next) => {
     if (additionalImages.length > 0) {
       const imageRecords = additionalImages.map((file, index) => ({
         productId: product.id,
-        url: file.path,
+        url: getPublicImageUrl(file.filename),
         publicId: file.filename,
         isPrimary: index === 0 && !primaryImage,
         sortOrder: index,
@@ -257,7 +258,7 @@ export const updateProduct = async (req, res, next) => {
     // Handle primary image upload - only update if new image is provided
     if (req.files?.['image']?.[0]) {
       console.log('New image file detected:', req.files['image'][0].filename);
-      updateData.image = req.files['image'][0].path;
+      updateData.image = getPublicImageUrl(req.files['image'][0].filename);
       updateData.imagePublicId = req.files['image'][0].filename;
     } else {
       console.log('No new image file detected, preserving existing image');
