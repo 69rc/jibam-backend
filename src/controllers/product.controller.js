@@ -7,7 +7,7 @@ import {
   getPagination,
   getPaginationMeta,
 } from '../utils/apiResponse.js';
-import { getPublicImageUrl } from '../config/cloudinary.js';
+import { getPublicImageUrl, fileToBase64 } from '../config/cloudinary.js';
 
 // GET /products — with filters, search, pagination
 export const getProducts = async (req, res, next) => {
@@ -172,10 +172,22 @@ export const createProduct = async (req, res, next) => {
     const category = await Category.findByPk(categoryId);
     if (!category) return errorResponse(res, 'Category not found', 404);
 
-    // Handle primary image - now using local storage
+    // Handle primary image - support both local and memory storage
     const primaryImage = req.files?.['image']?.[0];
-    const image = primaryImage ? getPublicImageUrl(primaryImage.filename) : null;
-    const imagePublicId = primaryImage ? primaryImage.filename : null;
+    let image = null;
+    let imagePublicId = null;
+
+    if (primaryImage) {
+      if (primaryImage.buffer) {
+        // Memory storage (Vercel) - convert to base64
+        image = fileToBase64(primaryImage);
+        imagePublicId = primaryImage.originalname;
+      } else {
+        // Disk storage (local) - use file path
+        image = getPublicImageUrl(primaryImage.filename);
+        imagePublicId = primaryImage.filename;
+      }
+    }
 
     const product = await Product.create({
       categoryId,
@@ -200,13 +212,23 @@ export const createProduct = async (req, res, next) => {
     // Handle additional images
     const additionalImages = req.files?.['images'] || [];
     if (additionalImages.length > 0) {
-      const imageRecords = additionalImages.map((file, index) => ({
-        productId: product.id,
-        url: getPublicImageUrl(file.filename),
-        publicId: file.filename,
-        isPrimary: index === 0 && !primaryImage,
-        sortOrder: index,
-      }));
+      const imageRecords = additionalImages.map((file, index) => {
+        let url, publicId;
+        if (file.buffer) {
+          url = fileToBase64(file);
+          publicId = file.originalname;
+        } else {
+          url = getPublicImageUrl(file.filename);
+          publicId = file.filename;
+        }
+        return {
+          productId: product.id,
+          url,
+          publicId,
+          isPrimary: index === 0 && !primaryImage,
+          sortOrder: index,
+        };
+      });
       await ProductImage.bulkCreate(imageRecords);
     }
 
@@ -258,8 +280,16 @@ export const updateProduct = async (req, res, next) => {
     // Handle primary image upload - only update if new image is provided
     if (req.files?.['image']?.[0]) {
       console.log('New image file detected:', req.files['image'][0].filename);
-      updateData.image = getPublicImageUrl(req.files['image'][0].filename);
-      updateData.imagePublicId = req.files['image'][0].filename;
+      const newImage = req.files['image'][0];
+      if (newImage.buffer) {
+        // Memory storage (Vercel) - convert to base64
+        updateData.image = fileToBase64(newImage);
+        updateData.imagePublicId = newImage.originalname;
+      } else {
+        // Disk storage (local) - use file path
+        updateData.image = getPublicImageUrl(newImage.filename);
+        updateData.imagePublicId = newImage.filename;
+      }
     } else {
       console.log('No new image file detected, preserving existing image');
       // Explicitly do not include image/imagePublicId in updateData

@@ -61,7 +61,7 @@ const Product = sequelize.define(
       defaultValue: false,
     },
     image: {
-      type: DataTypes.STRING(500),
+      type: DataTypes.TEXT, // Changed to TEXT to handle base64 data
       allowNull: true,
     },
     imagePublicId: {
