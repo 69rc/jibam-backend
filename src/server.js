@@ -105,6 +105,19 @@ app.use(async (req, res, next) => {
   next();
 });
 
+// ─── Root Route ────────────────────────────────────────────────────────────────
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Jibam Pharmacy API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      api: '/api/v1',
+    },
+    documentation: 'https://github.com/69rc/jibam',
+  });
+});
+
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/health', async (req, res) => {
   try {
