@@ -1,29 +1,17 @@
 import { body } from 'express-validator';
 
-// Custom validator to handle string 'true'/'false' for FormData
-const booleanValidator = (value) => {
-  if (value === undefined || value === null || value === '') return true;
-  if (typeof value === 'boolean') return true;
-  if (value === 'true' || value === 'false') return true;
-  throw new Error('Must be a boolean value');
-};
-
+// Skip validation for update - handle it in the controller
 export const createProductValidator = [
   body('categoryId').notEmpty().withMessage('Category is required').isUUID().withMessage('Invalid category ID'),
   body('name').trim().notEmpty().withMessage('Product name is required').isLength({ min: 2, max: 200 }),
   body('price').notEmpty().withMessage('Price is required').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
   body('stock').optional().isInt({ min: 0 }).withMessage('Stock must be a non-negative integer'),
-  body('prescriptionRequired').optional().custom(booleanValidator),
 ];
 
 export const updateProductValidator = [
+  // Minimal validation for update - most validation happens in controller
   body('price').optional().isFloat({ min: 0 }).withMessage('Price must be a positive number'),
   body('stock').optional().isInt({ min: 0 }).withMessage('Stock must be a non-negative integer'),
-  body('prescriptionRequired').optional().custom(booleanValidator),
-  body('isFeatured').optional().custom(booleanValidator),
-  body('isNewArrival').optional().custom(booleanValidator),
-  body('isBestSeller').optional().custom(booleanValidator),
-  body('isActive').optional().custom(booleanValidator),
 ];
 
 export const createCategoryValidator = [

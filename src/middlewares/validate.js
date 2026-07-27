@@ -11,17 +11,23 @@ export const normalizeFormData = (req, res, next) => {
       const booleanFields = ['prescriptionRequired', 'isFeatured', 'isNewArrival', 'isBestSeller', 'isActive'];
       const numberFields = ['price', 'comparePrice', 'stock'];
       
+      console.log('Before normalization:', req.body);
+      
       booleanFields.forEach(field => {
-        if (req.body[field] !== undefined) {
-          req.body[field] = req.body[field] === 'true' || req.body[field] === true;
+        if (req.body[field] !== undefined && req.body[field] !== '') {
+          const value = req.body[field];
+          req.body[field] = value === 'true' || value === true || value === '1';
         }
       });
       
       numberFields.forEach(field => {
         if (req.body[field] !== undefined && req.body[field] !== '') {
-          req.body[field] = parseFloat(req.body[field]);
+          const value = parseFloat(req.body[field]);
+          req.body[field] = isNaN(value) ? 0 : value;
         }
       });
+      
+      console.log('After normalization:', req.body);
     }
     next();
   } catch (error) {
@@ -43,6 +49,7 @@ export const validate = (req, res, next) => {
         message: err.msg,
       }));
 
+      console.error('Validation errors:', formattedErrors);
       return errorResponse(res, 'Validation failed', 422, formattedErrors);
     }
 

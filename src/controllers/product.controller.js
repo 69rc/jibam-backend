@@ -225,6 +225,12 @@ export const createProduct = async (req, res, next) => {
 // PUT /products/:id (admin)
 export const updateProduct = async (req, res, next) => {
   try {
+    console.log('Product update request:', {
+      id: req.params.id,
+      body: req.body,
+      files: req.files
+    });
+
     const product = await Product.findByPk(req.params.id);
     if (!product) return errorResponse(res, 'Product not found', 404);
 
@@ -238,17 +244,7 @@ export const updateProduct = async (req, res, next) => {
     const updateData = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
-        // Handle boolean conversions
-        if (field === 'prescriptionRequired' || field === 'isFeatured' || 
-            field === 'isNewArrival' || field === 'isBestSeller' || field === 'isActive') {
-          updateData[field] = req.body[field] === 'true' || req.body[field] === true;
-        } else if (field === 'price' || field === 'comparePrice' || field === 'stock') {
-          updateData[field] = parseFloat(req.body[field]);
-        } else if (field === 'tags' && typeof req.body[field] === 'string') {
-          updateData[field] = JSON.parse(req.body[field]);
-        } else {
-          updateData[field] = req.body[field];
-        }
+        updateData[field] = req.body[field];
       }
     }
 
@@ -257,6 +253,8 @@ export const updateProduct = async (req, res, next) => {
       updateData.image = req.files['image'][0].path;
       updateData.imagePublicId = req.files['image'][0].filename;
     }
+
+    console.log('Update data:', updateData);
 
     await product.update(updateData);
 
