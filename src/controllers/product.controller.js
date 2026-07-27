@@ -229,7 +229,9 @@ export const updateProduct = async (req, res, next) => {
       id: req.params.id,
       hasBody: !!req.body,
       hasFiles: !!req.files,
-      contentType: req.headers['content-type']
+      contentType: req.headers['content-type'],
+      bodyKeys: Object.keys(req.body || {}),
+      fileKeys: req.files ? Object.keys(req.files) : []
     });
 
     const product = await Product.findByPk(req.params.id);
@@ -247,24 +249,28 @@ export const updateProduct = async (req, res, next) => {
 
     const updateData = {};
     for (const field of allowedFields) {
-      if (req.body[field] !== undefined) {
+      if (req.body[field] !== undefined && req.body[field] !== null && req.body[field] !== '') {
         updateData[field] = req.body[field];
       }
     }
 
     // Handle primary image upload - only update if new image is provided
     if (req.files?.['image']?.[0]) {
+      console.log('New image file detected:', req.files['image'][0].filename);
       updateData.image = req.files['image'][0].path;
       updateData.imagePublicId = req.files['image'][0].filename;
+    } else {
+      console.log('No new image file detected, preserving existing image');
+      // Explicitly do not include image/imagePublicId in updateData
     }
-    // If no new image is uploaded, don't update the image field at all
-    // This preserves the existing image
 
-    console.log('Attempting to update product with data:', updateData);
+    console.log('Update data prepared:', updateData);
+    console.log('Current product image:', product.image);
 
     const updatedProduct = await product.update(updateData);
 
     console.log('Product updated successfully:', updatedProduct.id);
+    console.log('Updated product image:', updatedProduct.image);
 
     return successResponse(res, product, 'Product updated');
   } catch (error) {

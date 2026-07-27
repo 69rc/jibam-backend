@@ -123,6 +123,18 @@ const Product = sequelize.define(
             .trim();
         }
       },
+      beforeUpdate: (product) => {
+        // Prevent image from being set to null/empty string during update
+        if (product.changed('image') && (product.image === '' || product.image === null)) {
+          console.log('Preventing image from being set to null/empty:', product.image);
+          // Revert the change by not updating the image field
+          product.image = product.previous('image');
+        }
+        if (product.changed('imagePublicId') && (product.imagePublicId === '' || product.imagePublicId === null)) {
+          console.log('Preventing imagePublicId from being set to null/empty:', product.imagePublicId);
+          product.imagePublicId = product.previous('imagePublicId');
+        }
+      },
     },
   }
 );
