@@ -5,6 +5,11 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Validate Cloudinary configuration
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.warn('⚠️ Cloudinary configuration missing. File uploads may fail.');
+}
+
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -41,12 +46,17 @@ const avatarStorage = new CloudinaryStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|webp|pdf/;
-  const isValid = allowedTypes.test(file.mimetype);
-  if (isValid) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only JPEG, PNG, WEBP, and PDF files are allowed'), false);
+  try {
+    const allowedTypes = /jpeg|jpg|png|webp|pdf/;
+    const isValid = allowedTypes.test(file.mimetype);
+    if (isValid) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPEG, PNG, WEBP, and PDF files are allowed'), false);
+    }
+  } catch (error) {
+    console.error('File filter error:', error);
+    cb(error, false);
   }
 };
 

@@ -2,8 +2,34 @@
  * Global error handler middleware
  */
 export const errorHandler = (err, req, res, next) => {
+  // Handle undefined or malformed error objects
+  if (!err || typeof err !== 'object') {
+    console.error('❌ Invalid error object received:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'An unexpected error occurred',
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   let statusCode = err.statusCode || 500;
   let message = err.message || 'Internal Server Error';
+
+  // Handle completely undefined error properties
+  if (!err.name && !err.message && !err.stack) {
+    console.error('❌ Malformed error object:', {
+      err,
+      body: req.body,
+      files: req.files,
+      method: req.method,
+      url: req.url,
+    });
+    return res.status(500).json({
+      success: false,
+      message: 'An unexpected error occurred during processing',
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   // Sequelize validation errors
   if (err.name === 'SequelizeValidationError') {
@@ -70,6 +96,11 @@ export const errorHandler = (err, req, res, next) => {
     // Log additional error details if available
     ...(err.errors && { validationErrors: err.errors }),
     ...(err.code && { code: err.code }),
+    // Log request context
+    method: req.method,
+    url: req.url,
+    hasFiles: !!req.files,
+    hasBody: !!req.body,
   });
 
   return res.status(statusCode).json({
