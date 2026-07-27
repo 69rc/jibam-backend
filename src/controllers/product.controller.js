@@ -7,7 +7,7 @@ import {
   getPagination,
   getPaginationMeta,
 } from '../utils/apiResponse.js';
-import { getPublicImageUrl, fileToBase64 } from '../config/cloudinary.js';
+import { getPublicImageUrl, uploadToSupabase, deleteFromSupabase } from '../config/cloudinary.js';
 
 // GET /products — with filters, search, pagination
 export const getProducts = async (req, res, next) => {
@@ -172,21 +172,15 @@ export const createProduct = async (req, res, next) => {
     const category = await Category.findByPk(categoryId);
     if (!category) return errorResponse(res, 'Category not found', 404);
 
-    // Handle primary image - support both local and memory storage
+    // Handle primary image - upload to Supabase Storage
     const primaryImage = req.files?.['image']?.[0];
     let image = null;
     let imagePublicId = null;
 
     if (primaryImage) {
-      if (primaryImage.buffer) {
-        // Memory storage (Vercel) - convert to base64
-        image = fileToBase64(primaryImage);
-        imagePublicId = primaryImage.originalname;
-      } else {
-        // Disk storage (local) - use file path
-        image = getPublicImageUrl(primaryImage.filename);
-        imagePublicId = primaryImage.filename;
-      }
+      const uploadResult = await uploadToSupabase(primaryImage);
+      image = uploadResult.url;
+      imagePublicId = uploadResult.publicId;
     }
 
     const product = await Product.create({
@@ -212,23 +206,18 @@ export const createProduct = async (req, res, next) => {
     // Handle additional images
     const additionalImages = req.files?.['images'] || [];
     if (additionalImages.length > 0) {
-      const imageRecords = additionalImages.map((file, index) => {
-        let url, publicId;
-        if (file.buffer) {
-          url = fileToBase64(file);
-          publicId = file.originalname;
-        } else {
-          url = getPublicImageUrl(file.filename);
-          publicId = file.filename;
-        }
-        return {
+      const imageRecords = [];
+      for (let i = 0; i < additionalImages.length; i++) {
+        const file = additionalImages[i];
+        const uploadResult = await uploadToSupabase(file);
+        imageRecords.push({
           productId: product.id,
-          url,
-          publicId,
-          isPrimary: index === 0 && !primaryImage,
-          sortOrder: index,
-        };
-      });
+          url: uploadResult.url,
+          publicId: uploadResult.publicId,
+          isPrimary: i === 0 && !primaryImage,
+          sortOrder: i,
+        });
+      }
       await ProductImage.bulkCreate(imageRecords);
     }
 
@@ -277,22 +266,22 @@ export const updateProduct = async (req, res, next) => {
       }
     }
 
-    // Handle primary image upload - only update if new image is provided
+    // Handle primary image upload - delete old image and upload new one
     if (req.files?.['image']?.[0]) {
-      console.log('New image file detected:', req.files['image'][0].filename);
-      const newImage = req.files['image'][0];
-      if (newImage.buffer) {
-        // Memory storage (Vercel) - convert to base64
-        updateData.image = fileToBase64(newImage);
-        updateData.imagePublicId = newImage.originalname;
-      } else {
-        // Disk storage (local) - use file path
-        updateData.image = getPublicImageUrl(newImage.filename);
-        updateData.imagePublicId = newImage.filename;
+      console.log('New image file detected:', req.files['image'][0].originalname);
+      
+      // Delete old image from Supabase if exists
+      if (product.imagePublicId) {
+        await deleteFromSupabase(product.imagePublicId);
       }
+      
+      // Upload new image to Supabase
+      const newImage = req.files['image'][0];
+      const uploadResult = await uploadToSupabase(newImage);
+      updateData.image = uploadResult.url;
+      updateData.imagePublicId = uploadResult.publicId;
     } else {
       console.log('No new image file detected, preserving existing image');
-      // Explicitly do not include image/imagePublicId in updateData
     }
 
     console.log('Update data prepared:', updateData);
@@ -335,7 +324,23 @@ export const deleteProduct = async (req, res, next) => {
     const product = await Product.findByPk(req.params.id);
     if (!product) return errorResponse(res, 'Product not found', 404);
 
-    // Soft delete
+    // Delete primary image from Supabase Storage
+    if (product.imagePublicId) {
+      await deleteFromSupabase(product.imagePublicId);
+    }
+
+    // Delete additional images from Supabase Storage
+    const productImages = await ProductImage.findAll({
+      where: { productId: product.id }
+    });
+    
+    for (const image of productImages) {
+      if (image.publicId) {
+        await deleteFromSupabase(image.publicId);
+      }
+    }
+
+    // Soft delete (set isActive to false)
     await product.update({ isActive: false });
     return successResponse(res, null, 'Product deleted');
   } catch (error) {

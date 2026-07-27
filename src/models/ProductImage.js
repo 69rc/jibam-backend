@@ -14,7 +14,7 @@ const ProductImage = sequelize.define(
       allowNull: false,
     },
     url: {
-      type: DataTypes.TEXT, // Changed to TEXT to handle base64 data URLs
+      type: DataTypes.STRING(500),
       allowNull: false,
     },
     publicId: {
