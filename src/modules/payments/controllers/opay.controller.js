@@ -1,439 +1,243 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Order, Payment, PaymentLog, Notification, Product, OrderItem } from '../../../models/index.js';
+import { Order, Payment, PaymentLog, Notification, Product, OrderItem, User } from '../../../models/index.js';
 import opayService from '../services/opay.service.js';
 import { successResponse, errorResponse } from '../../../utils/apiResponse.js';
+import { sendPharmacistPaymentAlert } from '../../../utils/email.js';
 
-/**
- * Helper function to log payment events
- */
-async function logPaymentEvent(paymentId, event, requestPayload, responsePayload, status = 'success', errorMessage = null, ipAddress = null, userAgent = null) {
+// ─── helper: log payment event ────────────────────────────────────────────────
+async function logEvent(paymentId, event, req, responsePayload, status = 'success', errorMessage = null) {
   try {
     await PaymentLog.create({
       paymentId,
       event,
-      requestPayload,
-      responsePayload,
+      requestPayload:  null,
+      responsePayload: responsePayload || null,
       status,
       errorMessage,
-      ipAddress,
-      userAgent,
+      ipAddress: req?.ip,
+      userAgent: req?.get('user-agent'),
     });
-  } catch (error) {
-    console.error('Failed to log payment event:', error.message);
+  } catch (e) {
+    console.error('[PaymentLog] Failed to log:', e.message);
   }
 }
 
-/**
- * Initialize OPay payment
- * POST /api/v1/payments/opay/initialize
- */
+// ─── helper: fulfill order after successful payment ────────────────────────────
+async function fulfillOrder(orderId, transactionId, channel, paymentId, userId, reference) {
+  const order = await Order.findByPk(orderId);
+  if (!order) return;
+
+  await order.update({
+    status: 'paid',
+    paymentStatus: 'paid',
+    paidAt: new Date(),
+  });
+
+  // Create in-app notification
+  Notification.create({
+    userId,
+    title: 'Payment Successful 🎉',
+    message: `Your payment for order #${order.orderNumber} was successful.`,
+    type: 'payment',
+    data: { orderId: order.id, reference },
+  }).catch(console.error);
+
+  // Email pharmacist
+  const customer = await User.findByPk(userId, { attributes: ['id', 'fullname', 'email', 'phone'] });
+  sendPharmacistPaymentAlert(order, customer, channel).catch(console.error);
+
+  return order;
+}
+
+// ─── POST /api/v1/payments/opay/initialize ─────────────────────────────────────
 export const initializeOPayPayment = async (req, res, next) => {
   try {
     const { orderId } = req.body;
     const userId = req.user.id;
 
-    // Validate order
     const order = await Order.findOne({
       where: { id: orderId, userId },
-      include: [
-        {
-          model: OrderItem,
-          as: 'items',
-          include: [{ model: Product, as: 'product' }],
-        },
-      ],
+      include: [{ model: OrderItem, as: 'items' }],
     });
 
-    if (!order) {
-      return errorResponse(res, 'Order not found', 404);
-    }
+    if (!order)                         return errorResponse(res, 'Order not found', 404);
+    if (order.paymentStatus === 'paid') return errorResponse(res, 'Order already paid', 400);
+    if (order.status === 'cancelled')   return errorResponse(res, 'Cannot pay for a cancelled order', 400);
 
-    if (order.paymentStatus === 'paid') {
-      return errorResponse(res, 'Order already paid', 400);
-    }
-
-    if (order.status === 'cancelled') {
-      return errorResponse(res, 'Cannot pay for a cancelled order', 400);
-    }
-
-    // Generate unique reference
     const reference = `OPAY-${Date.now()}-${uuidv4().slice(0, 8).toUpperCase()}`;
 
-    // Prepare payment data
-    const paymentData = {
+    // Call OPay cashier API
+    const result = await opayService.initializePayment({
       reference,
-      amount: parseFloat(order.total),
-      currency: 'NGN',
+      amount:        parseFloat(order.total),
+      currency:      'NGN',
       customerEmail: req.user.email,
-      customerName: req.user.fullname,
+      customerName:  req.user.fullname,
       customerPhone: req.user.phone || '',
-      orderId: order.id,
       userId,
-    };
-
-    // Log initialization attempt
-    await logPaymentEvent(
-      null,
-      'initialization',
-      paymentData,
-      null,
-      'pending',
-      null,
-      req.ip,
-      req.get('user-agent')
-    );
-
-    // Initialize payment with OPay
-    const opayResponse = await opayService.initializePayment(paymentData);
-
-    if (!opayResponse.success) {
-      return errorResponse(res, opayResponse.message || 'Payment initialization failed', 500);
-    }
-
-    // Create payment record
-    const payment = await Payment.create({
-      orderId: order.id,
-      userId,
-      reference,
-      amount: parseFloat(order.total),
-      currency: 'NGN',
-      provider: 'opay',
-      status: 'pending',
-      metadata: opayResponse.data,
+      items:         order.items || [],
+      expireAt:      600,
     });
 
-    // Log successful initialization
-    await logPaymentEvent(
-      payment.id,
-      'initialization',
-      paymentData,
-      opayResponse.data,
-      'success',
-      null,
-      req.ip,
-      req.get('user-agent')
-    );
+    // Save pending payment record
+    const payment = await Payment.create({
+      orderId:  order.id,
+      userId,
+      reference,
+      amount:   parseFloat(order.total),
+      currency: 'NGN',
+      provider: 'opay',
+      status:   'pending',
+      metadata: result.raw,
+    });
 
-    // Update order with payment reference
     await order.update({ paymentReference: reference });
+    await logEvent(payment.id, 'initialization', req, result.raw, 'success');
 
-    return successResponse(
-      res,
-      {
-        paymentId: payment.id,
-        authorizationUrl: opayResponse.data.paymentUrl || opayResponse.data.checkoutUrl,
-        reference,
-        amount: parseFloat(order.total),
-        currency: 'NGN',
-        expireAt: opayResponse.data.expireAt,
-      },
-      'OPay payment initialized successfully'
-    );
+    return successResponse(res, {
+      paymentId:    payment.id,
+      cashierUrl:   result.cashierUrl,   // redirect customer here
+      reference,
+      amount:       parseFloat(order.total),
+      currency:     'NGN',
+      expireAt:     result.expireAt,
+    }, 'OPay payment initialized');
+
   } catch (error) {
-    console.error('OPay initialization error:', error);
+    console.error('[OPay] initializePayment error:', error.message);
     next(error);
   }
 };
 
-/**
- * Verify OPay payment
- * GET /api/v1/payments/opay/verify/:reference
- */
+// ─── GET /api/v1/payments/opay/verify/:reference ────────────────────────────────
 export const verifyOPayPayment = async (req, res, next) => {
   try {
     const { reference } = req.params;
 
-    // Find payment record
     const payment = await Payment.findOne({ where: { reference } });
-    if (!payment) {
-      return errorResponse(res, 'Payment record not found', 404);
-    }
+    if (!payment) return errorResponse(res, 'Payment record not found', 404);
 
-    // If already verified, return existing data
     if (payment.status === 'success') {
-      return successResponse(res, payment, 'Payment already verified');
+      return successResponse(res, { payment }, 'Payment already verified');
     }
 
-    // Log verification attempt
-    await logPaymentEvent(
-      payment.id,
-      'verification',
-      { reference },
-      null,
-      'pending',
-      null,
-      req.ip,
-      req.get('user-agent')
-    );
+    const result = await opayService.verifyPayment(reference);
+    await logEvent(payment.id, 'verification', req, result.raw, result.success ? 'success' : 'failed');
 
-    // Verify with OPay
-    const opayResponse = await opayService.verifyPayment(reference);
-
-    // Log verification response
-    await logPaymentEvent(
-      payment.id,
-      'verification',
-      { reference },
-      opayResponse.data,
-      opayResponse.success ? 'success' : 'failed',
-      opayResponse.success ? null : opayResponse.message,
-      req.ip,
-      req.get('user-agent')
-    );
-
-    if (!opayResponse.success || opayResponse.data.status !== 'success') {
-      // Update payment as failed
-      await payment.update({
-        status: 'failed',
-        gatewayResponse: opayResponse.message || 'Payment verification failed',
-      });
-
-      return errorResponse(res, 'Payment verification failed', 400);
+    if (!result.success) {
+      await payment.update({ status: result.status === 'fail' ? 'failed' : result.status, gatewayResponse: result.status });
+      return errorResponse(res, `Payment ${result.status}`, 400);
     }
 
-    // Update payment record
     await payment.update({
-      status: 'success',
-      transactionId: opayResponse.data.transactionId,
-      channel: opayResponse.data.channel || 'opay',
-      gatewayResponse: opayResponse.message || 'Payment successful',
-      paidAt: new Date(),
-      metadata: opayResponse.data,
+      status:          'success',
+      transactionId:   result.transactionId,
+      channel:         result.channel,
+      gatewayResponse: 'Payment successful',
+      paidAt:          result.paidAt,
+      metadata:        result.raw,
     });
 
-    // Update order
-    const order = await Order.findByPk(payment.orderId);
-    if (order) {
-      await order.update({
-        status: 'paid',
-        paymentStatus: 'paid',
-        paidAt: new Date(),
-      });
+    const order = await fulfillOrder(payment.orderId, result.transactionId, result.channel, payment.id, payment.userId, reference);
 
-      // Reduce product stock
-      const orderItems = await OrderItem.findAll({ where: { orderId: order.id } });
-      for (const item of orderItems) {
-        const product = await Product.findByPk(item.productId);
-        if (product) {
-          await product.update({
-            stock: Math.max(0, product.stock - item.quantity),
-          });
-        }
-      }
+    return successResponse(res, {
+      payment,
+      order: order ? { id: order.id, orderNumber: order.orderNumber, status: order.status } : null,
+    }, 'Payment verified successfully');
 
-      // Create notification
-      await Notification.create({
-        userId: payment.userId,
-        title: 'Payment Successful',
-        message: `Payment of ₦${Number(payment.amount).toLocaleString()} for order #${order.orderNumber} was successful.`,
-        type: 'payment',
-        data: { orderId: order.id, reference },
-      }).catch(console.error);
-    }
-
-    return successResponse(
-      res,
-      {
-        payment,
-        order: order ? {
-          id: order.id,
-          orderNumber: order.orderNumber,
-          status: order.status,
-          paymentStatus: order.paymentStatus,
-          total: order.total,
-        } : null,
-      },
-      'Payment verified successfully'
-    );
   } catch (error) {
-    console.error('OPay verification error:', error);
+    console.error('[OPay] verifyPayment error:', error.message);
     next(error);
   }
 };
 
-/**
- * Handle OPay webhook
- * POST /api/v1/payments/opay/webhook
- */
+// ─── POST /api/v1/payments/opay/webhook ────────────────────────────────────────
 export const handleOPayWebhook = async (req, res, next) => {
   try {
-    const payload = req.body;
+    const payload   = req.body;
     const signature = req.headers['x-opay-signature'] || req.headers['signature'];
 
-    // Verify webhook signature
     if (!opayService.verifyWebhookSignature(payload, signature)) {
       return errorResponse(res, 'Invalid webhook signature', 401);
     }
 
-    const { reference, status, amount, transactionId } = payload;
+    const reference = payload.reference || payload.orderNo;
+    const status    = (payload.status || payload.orderStatus || '').toUpperCase();
 
-    // Find payment record
     const payment = await Payment.findOne({ where: { reference } });
-    if (!payment) {
-      return errorResponse(res, 'Payment record not found', 404);
+    if (!payment) return errorResponse(res, 'Payment not found', 404);
+
+    if (payment.status === 'success' && status === 'SUCCESS') {
+      return successResponse(res, { message: 'Already processed' });
     }
 
-    // Prevent duplicate processing
-    if (payment.status === 'success' && status === 'success') {
-      return successResponse(res, { message: 'Webhook already processed' });
-    }
+    await logEvent(payment.id, 'webhook', req, payload, 'success');
 
-    // Log webhook event
-    await logPaymentEvent(
-      payment.id,
-      'webhook',
-      payload,
-      null,
-      'success',
-      null,
-      req.ip,
-      req.get('user-agent')
-    );
-
-    // Update payment based on webhook status
-    if (status === 'success') {
+    if (status === 'SUCCESS') {
       await payment.update({
-        status: 'success',
-        transactionId,
-        gatewayResponse: 'Payment successful via webhook',
-        paidAt: new Date(),
-        metadata: payload,
+        status:          'success',
+        transactionId:   payload.transId || payload.orderNo,
+        channel:         payload.payChannel || 'opay',
+        gatewayResponse: 'Webhook: payment successful',
+        paidAt:          new Date(),
+        metadata:        payload,
       });
+      await fulfillOrder(payment.orderId, payload.transId, payload.payChannel, payment.id, payment.userId, reference);
 
-      // Update order
-      const order = await Order.findByPk(payment.orderId);
-      if (order) {
-        await order.update({
-          status: 'paid',
-          paymentStatus: 'paid',
-          paidAt: new Date(),
-        });
-
-        // Reduce product stock
-        const orderItems = await OrderItem.findAll({ where: { orderId: order.id } });
-        for (const item of orderItems) {
-          const product = await Product.findByPk(item.productId);
-          if (product) {
-            await product.update({
-              stock: Math.max(0, product.stock - item.quantity),
-            });
-          }
-        }
-
-        // Create notification
-        await Notification.create({
-          userId: payment.userId,
-          title: 'Payment Successful',
-          message: `Payment of ₦${Number(payment.amount).toLocaleString()} for order #${order.orderNumber} was successful.`,
-          type: 'payment',
-          data: { orderId: order.id, reference },
-        }).catch(console.error);
-      }
-    } else if (status === 'failed' || status === 'cancelled') {
-      await payment.update({
-        status: 'failed',
-        gatewayResponse: `Payment ${status} via webhook`,
-        metadata: payload,
-      });
+    } else if (['FAIL', 'CANCEL'].includes(status)) {
+      await payment.update({ status: 'failed', gatewayResponse: `Webhook: ${status}`, metadata: payload });
     }
 
-    return successResponse(res, { message: 'Webhook processed successfully' });
+    return successResponse(res, { message: 'Webhook processed' });
+
   } catch (error) {
-    console.error('OPay webhook error:', error);
+    console.error('[OPay] webhook error:', error.message);
     next(error);
   }
 };
 
-/**
- * Handle OPay callback
- * GET /api/v1/payments/opay/callback
- */
-export const handleOPayCallback = async (req, res, next) => {
+// ─── GET /api/v1/payments/opay/callback ────────────────────────────────────────
+// OPay redirects customer here after payment attempt
+export const handleOPayCallback = async (req, res) => {
+  const { reference, status } = req.query;
+  const frontendBase = process.env.CUSTOMER_APP_URL || 'http://localhost:3002';
+
+  if (!reference) {
+    return res.redirect(`${frontendBase}/cart?error=missing_reference`);
+  }
+
   try {
-    const { reference, status } = req.query;
-
-    if (!reference) {
-      return res.redirect(`${process.env.CUSTOMER_APP_URL}/checkout?error=missing_reference`);
-    }
-
-    // Verify payment
     const payment = await Payment.findOne({ where: { reference } });
-    if (!payment) {
-      return res.redirect(`${process.env.CUSTOMER_APP_URL}/checkout?error=payment_not_found`);
-    }
+    if (!payment) return res.redirect(`${frontendBase}/cart?error=payment_not_found`);
 
-    // Log callback event
-    await logPaymentEvent(
-      payment.id,
-      'callback',
-      req.query,
-      null,
-      'success',
-      null,
-      req.ip,
-      req.get('user-agent')
-    );
-
-    // If payment is already successful, redirect to success page
     if (payment.status === 'success') {
-      return res.redirect(`${process.env.CUSTOMER_APP_URL}/order-success?reference=${reference}`);
+      return res.redirect(`${frontendBase}/order-success?reference=${reference}`);
     }
 
-    // If payment failed or cancelled, redirect to failure page
-    if (status === 'cancelled' || payment.status === 'failed') {
-      return res.redirect(`${process.env.CUSTOMER_APP_URL}/checkout?error=payment_failed&reference=${reference}`);
+    if (status === 'Cancel' || status === 'Fail') {
+      return res.redirect(`${frontendBase}/payment?error=payment_failed&reference=${reference}`);
     }
 
-    // Otherwise, verify with OPay
-    try {
-      const opayResponse = await opayService.verifyPayment(reference);
+    // Auto-verify after redirect
+    const result = await opayService.verifyPayment(reference);
 
-      if (opayResponse.success && opayResponse.data.status === 'success') {
-        // Update payment
-        await payment.update({
-          status: 'success',
-          transactionId: opayResponse.data.transactionId,
-          channel: opayResponse.data.channel || 'opay',
-          gatewayResponse: opayResponse.message || 'Payment successful',
-          paidAt: new Date(),
-          metadata: opayResponse.data,
-        });
-
-        // Update order
-        const order = await Order.findByPk(payment.orderId);
-        if (order) {
-          await order.update({
-            status: 'paid',
-            paymentStatus: 'paid',
-            paidAt: new Date(),
-          });
-
-          // Reduce product stock
-          const orderItems = await OrderItem.findAll({ where: { orderId: order.id } });
-          for (const item of orderItems) {
-            const product = await Product.findByPk(item.productId);
-            if (product) {
-              await product.update({
-                stock: Math.max(0, product.stock - item.quantity),
-              });
-            }
-          }
-        }
-
-        return res.redirect(`${process.env.CUSTOMER_APP_URL}/order-success?reference=${reference}`);
-      } else {
-        await payment.update({
-          status: 'failed',
-          gatewayResponse: opayResponse.message || 'Payment verification failed',
-        });
-        return res.redirect(`${process.env.CUSTOMER_APP_URL}/checkout?error=payment_failed&reference=${reference}`);
-      }
-    } catch (error) {
-      console.error('Callback verification error:', error);
-      return res.redirect(`${process.env.CUSTOMER_APP_URL}/checkout?error=verification_failed&reference=${reference}`);
+    if (result.success) {
+      await payment.update({
+        status:          'success',
+        transactionId:   result.transactionId,
+        channel:         result.channel,
+        gatewayResponse: 'Callback verified',
+        paidAt:          result.paidAt,
+        metadata:        result.raw,
+      });
+      await fulfillOrder(payment.orderId, result.transactionId, result.channel, payment.id, payment.userId, reference);
+      return res.redirect(`${frontendBase}/order-success?reference=${reference}`);
     }
-  } catch (error) {
-    console.error('OPay callback error:', error);
-    return res.redirect(`${process.env.CUSTOMER_APP_URL}/checkout?error=callback_error`);
+
+    return res.redirect(`${frontendBase}/payment?error=payment_failed&reference=${reference}`);
+
+  } catch (err) {
+    console.error('[OPay] callback error:', err.message);
+    return res.redirect(`${frontendBase}/cart?error=callback_error`);
   }
 };

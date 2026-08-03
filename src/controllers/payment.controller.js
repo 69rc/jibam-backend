@@ -1,8 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Order, Payment, Notification } from '../models/index.js';
+import { Order, Payment, Notification, User, OrderItem } from '../models/index.js';
 import { initializeTransaction, verifyTransaction } from '../services/paystack.service.js';
 import { successResponse, errorResponse } from '../utils/apiResponse.js';
-import { sendOrderConfirmationEmail } from '../utils/email.js';
+import { sendOrderConfirmationEmail, sendPharmacistPaymentAlert } from '../utils/email.js';
+import { sendWhatsAppNotification } from '../utils/whatsapp.js';
 
 // POST /payments/initialize
 export const initializePayment = async (req, res, next) => {
@@ -106,7 +107,17 @@ export const verifyPayment = async (req, res, next) => {
       paidAt: new Date(paystackResponse.data.paid_at),
     });
 
-    // Create notification
+    // Fetch customer info
+    const customer = await User.findByPk(payment.userId, {
+      attributes: ['id', 'fullname', 'email', 'phone'],
+    });
+
+    // Fetch order items
+    const orderWithItems = await Order.findByPk(order.id, {
+      include: [{ model: OrderItem, as: 'items' }],
+    });
+
+    // Create in-app notification
     Notification.create({
       userId: payment.userId,
       title: 'Payment Successful',
@@ -114,6 +125,23 @@ export const verifyPayment = async (req, res, next) => {
       type: 'payment',
       data: { orderId: order.id, reference },
     }).catch(console.error);
+
+    // Notify pharmacist via WhatsApp that payment was confirmed
+    const msg = `✅ *PAYMENT CONFIRMED — Jibam Pharmacy*\n\n` +
+      `📦 Order #${order.orderNumber}\n` +
+      `👤 ${customer?.fullname || 'Customer'}\n` +
+      `📞 ${order.deliveryPhone || customer?.phone || 'N/A'}\n` +
+      `💰 *₦${Number(order.total).toLocaleString()} PAID*\n` +
+      `🏦 Channel: ${paystackResponse.data.channel || 'Paystack'}\n` +
+      `📍 ${order.deliveryAddress || 'N/A'}\n\n` +
+      `_Order is now ready to process._`;
+    sendWhatsAppNotification(process.env.PHARMACIST_WHATSAPP, msg).catch(console.error);
+
+    // Send email confirmation to customer (non-blocking)
+    if (customer) sendOrderConfirmationEmail(customer, orderWithItems).catch(console.error);
+
+    // Send payment confirmed alert to pharmacist email (non-blocking, no third-party)
+    sendPharmacistPaymentAlert(order, customer, paystackResponse.data.channel).catch(console.error);
 
     return successResponse(res, {
       payment,

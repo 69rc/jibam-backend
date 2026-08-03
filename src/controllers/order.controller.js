@@ -7,7 +7,8 @@ import {
   getPagination,
   getPaginationMeta,
 } from '../utils/apiResponse.js';
-import { sendOrderConfirmationEmail } from '../utils/email.js';
+import { sendOrderConfirmationEmail, sendPharmacistOrderAlert } from '../utils/email.js';
+import { notifyPharmacistNewOrder } from '../utils/whatsapp.js';
 
 const DELIVERY_FEE = 500; // ₦500 flat delivery fee
 
@@ -150,7 +151,12 @@ export const createOrder = async (req, res, next) => {
 
     await t.commit();
 
-    // Create notification (non-blocking)
+    // Fetch full order with items (needed for notifications)
+    const fullOrder = await Order.findByPk(order.id, {
+      include: [{ model: OrderItem, as: 'items' }],
+    });
+
+    // Create in-app notification (non-blocking)
     Notification.create({
       userId: req.user.id,
       title: 'Order Placed',
@@ -159,12 +165,14 @@ export const createOrder = async (req, res, next) => {
       data: { orderId: order.id, orderNumber: order.orderNumber },
     }).catch(console.error);
 
-    // Send confirmation email (non-blocking)
-    sendOrderConfirmationEmail(req.user, order).catch(console.error);
+    // Send confirmation email to customer (non-blocking)
+    sendOrderConfirmationEmail(req.user, fullOrder).catch(console.error);
 
-    const fullOrder = await Order.findByPk(order.id, {
-      include: [{ model: OrderItem, as: 'items' }],
-    });
+    // Send new order alert to pharmacist email (non-blocking, no third-party)
+    sendPharmacistOrderAlert(fullOrder, req.user).catch(console.error);
+
+    // Send WhatsApp notification to pharmacist (non-blocking, optional)
+    notifyPharmacistNewOrder(fullOrder, req.user).catch(console.error);
 
     return successResponse(res, fullOrder, 'Order created successfully', 201);
   } catch (error) {

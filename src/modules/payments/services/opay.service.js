@@ -1,201 +1,194 @@
-import crypto from 'crypto';
-import axios from 'axios';
-
 /**
  * OPay Payment Service
- * Handles all OPay payment gateway operations
+ * Uses OPay International Cashier API
+ * Docs: https://documentation.opaycheckout.com/
+ *
+ * Required env vars:
+ *   OPAY_PUBLIC_KEY    — starts with OPAYPUB...
+ *   OPAY_MERCHANT_ID   — 18-digit merchant ID e.g. 256621051120756
+ *   OPAY_BASE_URL      — https://sandboxapi.opaycheckout.com  (sandbox)
+ *                        https://api.opaycheckout.com          (production)
+ *   OPAY_CALLBACK_URL  — your backend callback URL (GET, redirect after payment)
+ *   OPAY_RETURN_URL    — customer return URL after payment
+ *   OPAY_CANCEL_URL    — customer cancel URL
+ *   OPAY_WEBHOOK_SECRET — for verifying webhook signatures
+ *   OPAY_COUNTRY       — country code e.g. NG, EG (default: NG)
  */
+
+import axios from 'axios';
+import crypto from 'crypto';
+
 class OPayService {
   constructor() {
-    this.merchantId = process.env.OPAY_MERCHANT_ID;
-    this.apiKey = process.env.OPAY_API_KEY;
-    this.secretKey = process.env.OPAY_SECRET_KEY;
-    this.baseUrl = process.env.OPAY_BASE_URL || 'https://api.opaycheckout.com';
+    this.publicKey   = process.env.OPAY_PUBLIC_KEY;
+    this.merchantId  = process.env.OPAY_MERCHANT_ID;
+    this.baseUrl     = process.env.OPAY_BASE_URL || 'https://sandboxapi.opaycheckout.com';
     this.callbackUrl = process.env.OPAY_CALLBACK_URL;
+    this.returnUrl   = process.env.OPAY_RETURN_URL;
+    this.cancelUrl   = process.env.OPAY_CANCEL_URL;
+    this.country     = process.env.OPAY_COUNTRY || 'NG';
     this.webhookSecret = process.env.OPAY_WEBHOOK_SECRET;
   }
 
-  /**
-   * Generate OPay signature for request authentication
-   */
-  generateSignature(data) {
-    const sortedKeys = Object.keys(data).sort();
-    const queryString = sortedKeys
-      .map((key) => `${key}=${data[key]}`)
-      .join('&');
-    return crypto
-      .createHash('sha512')
-      .update(queryString + this.secretKey)
-      .digest('hex');
+  // ─── HTTP helper ───────────────────────────────────────────────────────────
+  async _post(endpoint, body) {
+    const url = `${this.baseUrl}${endpoint}`;
+    const response = await axios.post(url, body, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.publicKey}`,
+        'MerchantId': this.merchantId,
+      },
+      timeout: 30000,
+    });
+    return response.data;
   }
 
+  // ─── Initialize cashier payment ────────────────────────────────────────────
   /**
-   * Verify webhook signature
+   * Creates an OPay hosted checkout session.
+   * Returns a cashier URL the customer is redirected to.
+   *
+   * @param {Object} p
+   * @param {string}   p.reference       — unique order reference
+   * @param {number}   p.amount          — total in smallest unit (kobo for NGN, or full NGN)
+   * @param {string}   p.currency        — e.g. 'NGN'
+   * @param {string}   p.customerEmail
+   * @param {string}   p.customerName
+   * @param {string}   p.customerPhone
+   * @param {string}   p.userId
+   * @param {Array}    p.items           — order items array
+   * @param {number}   p.expireAt        — seconds until expiry (default 600 = 10 min)
    */
-  verifyWebhookSignature(payload, signature) {
-    const expectedSignature = crypto
-      .createHash('sha512')
-      .update(JSON.stringify(payload) + this.webhookSecret)
-      .digest('hex');
-    return expectedSignature === signature;
-  }
+  async initializePayment(p) {
+    const {
+      reference,
+      amount,
+      currency = 'NGN',
+      customerEmail,
+      customerName,
+      customerPhone,
+      userId,
+      items = [],
+      expireAt = 600,
+    } = p;
 
-  /**
-   * Initialize OPay payment
-   */
-  async initializePayment(paymentData) {
-    try {
-      const {
-        reference,
-        amount,
-        currency = 'NGN',
-        customerEmail,
-        customerName,
-        customerPhone,
-        orderId,
-        userId,
-      } = paymentData;
+    // OPay expects amount in full units (not kobo) for NGN international cashier
+    const amountValue = parseFloat(amount).toFixed(2);
 
-      const payload = {
-        merchantId: this.merchantId,
-        reference,
-        amount: amount.toString(),
+    // Build product list from order items
+    const productList = items.length > 0
+      ? items.map((item, idx) => ({
+          description: item.productName || item.name || 'Medicine',
+          imageUrl:    item.productImage || item.image || 'https://via.placeholder.com/100',
+          name:        item.productName || item.name || 'Product',
+          price:       parseFloat(item.price),
+          productId:   item.productId || item.id || `product_${idx}`,
+          quantity:    item.quantity || 1,
+        }))
+      : [{
+          description: 'Jibam Pharmacy Order',
+          imageUrl:    'https://via.placeholder.com/100',
+          name:        'Pharmacy Products',
+          price:       parseFloat(amountValue),
+          productId:   reference,
+          quantity:    1,
+        }];
+
+    const body = {
+      amount: {
         currency,
-        customerName,
-        customerEmail,
-        customerPhone,
-        callbackUrl: this.callbackUrl,
-        cancelUrl: `${this.callbackUrl}?status=cancelled`,
-        expireAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutes expiry
-        metadata: JSON.stringify({
-          orderId,
-          userId,
-          orderType: 'pharmacy',
-        }),
-      };
+        total: parseFloat(amountValue),
+      },
+      callbackUrl: this.callbackUrl,
+      cancelUrl:   this.cancelUrl   || `${process.env.CUSTOMER_APP_URL}/cart`,
+      country:     this.country,
+      expireAt,
+      payMethod:   'BankCard',       // BankCard | BankAccount | Wallet
+      productList,
+      reference,
+      returnUrl:   this.returnUrl   || `${process.env.CUSTOMER_APP_URL}/payment/verify?reference=${reference}`,
+      userInfo: {
+        userEmail:  customerEmail  || '',
+        userId:     userId         || '',
+        userMobile: customerPhone  || '',
+        userName:   customerName   || '',
+      },
+    };
 
-      const signature = this.generateSignature(payload);
+    const data = await this._post('/api/v1/international/cashier/create', body);
 
-      const response = await axios.post(
-        `${this.baseUrl}/api/v1/payment/create`,
-        payload,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Signature': signature,
-          },
-        }
-      );
-
-      return {
-        success: response.data.code === '00000',
-        data: response.data.data,
-        message: response.data.message,
-      };
-    } catch (error) {
-      console.error('OPay initialization error:', error.response?.data || error.message);
-      throw new Error(error.response?.data?.message || 'Payment initialization failed');
+    // OPay success code is '00000'
+    if (data.code !== '00000') {
+      throw new Error(data.message || 'OPay cashier creation failed');
     }
+
+    return {
+      success: true,
+      cashierUrl: data.data?.cashierUrl,
+      reference,
+      expireAt:   data.data?.expireAt,
+      raw:        data.data,
+    };
   }
 
-  /**
-   * Verify OPay payment status
-   */
+  // ─── Query / verify payment status ─────────────────────────────────────────
   async verifyPayment(reference) {
-    try {
-      const payload = {
-        merchantId: this.merchantId,
-        reference,
-      };
+    const body = {
+      country:    this.country,
+      reference,
+      merchantId: this.merchantId,
+    };
 
-      const signature = this.generateSignature(payload);
+    const data = await this._post('/api/v1/international/cashier/query', body);
 
-      const response = await axios.post(
-        `${this.baseUrl}/api/v1/payment/query`,
-        payload,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Signature': signature,
-          },
-        }
-      );
-
-      return {
-        success: response.data.code === '00000',
-        data: response.data.data,
-        message: response.data.message,
-      };
-    } catch (error) {
-      console.error('OPay verification error:', error.response?.data || error.message);
-      throw new Error(error.response?.data?.message || 'Payment verification failed');
+    if (data.code !== '00000') {
+      throw new Error(data.message || 'OPay payment query failed');
     }
+
+    const status = data.data?.status;   // SUCCESS | PENDING | FAIL | CANCEL
+
+    return {
+      success:       status === 'SUCCESS',
+      status:        status?.toLowerCase() || 'unknown',
+      transactionId: data.data?.transId || data.data?.orderNo,
+      channel:       data.data?.payChannel || 'opay',
+      amount:        data.data?.amount?.total,
+      currency:      data.data?.amount?.currency,
+      paidAt:        data.data?.finishTime ? new Date(data.data.finishTime) : new Date(),
+      raw:           data.data,
+    };
   }
 
-  /**
-   * Process OPay webhook
-   */
-  async processWebhook(payload, signature) {
-    try {
-      // Verify signature
-      if (!this.verifyWebhookSignature(payload, signature)) {
-        throw new Error('Invalid webhook signature');
-      }
+  // ─── Refund ────────────────────────────────────────────────────────────────
+  async refundPayment(reference, amount, reason = 'Customer request') {
+    const body = {
+      country:   this.country,
+      reference,
+      amount: {
+        total:    parseFloat(amount).toFixed(2),
+        currency: 'NGN',
+      },
+      reason,
+    };
 
-      const { reference, status, amount, transactionId } = payload;
+    const data = await this._post('/api/v1/international/cashier/refund', body);
 
-      return {
-        success: true,
-        data: {
-          reference,
-          status,
-          amount,
-          transactionId,
-        },
-      };
-    } catch (error) {
-      console.error('OPay webhook processing error:', error.message);
-      throw new Error(error.message);
-    }
+    return {
+      success: data.code === '00000',
+      message: data.message,
+      raw:     data.data,
+    };
   }
 
-  /**
-   * Refund OPay payment (if needed)
-   */
-  async refundPayment(reference, amount, reason) {
-    try {
-      const payload = {
-        merchantId: this.merchantId,
-        reference,
-        amount: amount.toString(),
-        reason,
-      };
-
-      const signature = this.generateSignature(payload);
-
-      const response = await axios.post(
-        `${this.baseUrl}/api/v1/payment/refund`,
-        payload,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Signature': signature,
-          },
-        }
-      );
-
-      return {
-        success: response.data.code === '00000',
-        data: response.data.data,
-        message: response.data.message,
-      };
-    } catch (error) {
-      console.error('OPay refund error:', error.response?.data || error.message);
-      throw new Error(error.response?.data?.message || 'Refund failed');
-    }
+  // ─── Webhook signature verification ────────────────────────────────────────
+  verifyWebhookSignature(payload, receivedSignature) {
+    if (!this.webhookSecret || !receivedSignature) return false;
+    const expected = crypto
+      .createHmac('sha512', this.webhookSecret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+    return expected === receivedSignature;
   }
 }
 
