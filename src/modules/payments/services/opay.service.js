@@ -32,12 +32,21 @@ class OPayService {
 
   // ─── HTTP helper ───────────────────────────────────────────────────────────
   async _post(endpoint, body) {
+    // Validate required env vars before making any request
+    if (!this.publicKey) throw new Error('OPAY_PUBLIC_KEY is not set in environment variables');
+    if (!this.merchantId) throw new Error('OPAY_MERCHANT_ID is not set in environment variables');
+
     const url = `${this.baseUrl}${endpoint}`;
+
+    console.log(`[OPay] POST ${url}`);
+    console.log(`[OPay] MerchantId: ${this.merchantId}`);
+    console.log(`[OPay] PublicKey starts with: ${this.publicKey?.slice(0, 12)}...`);
+
     const response = await axios.post(url, body, {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.publicKey}`,
-        'MerchantId': this.merchantId,
+        'MerchantId': this.merchantId,          // exact header name OPay expects
       },
       timeout: 30000,
     });
@@ -104,7 +113,8 @@ class OPayService {
       cancelUrl:   this.cancelUrl   || `${process.env.CUSTOMER_APP_URL}/cart`,
       country:     this.country,
       expireAt,
-      payMethod:   'BankCard',       // BankCard | BankAccount | Wallet
+      merchantId:  this.merchantId,    // some OPay endpoints also require it in body
+      payMethod:   'BankCard',
       productList,
       reference,
       returnUrl:   this.returnUrl   || `${process.env.CUSTOMER_APP_URL}/payment/verify?reference=${reference}`,
