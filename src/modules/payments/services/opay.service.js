@@ -57,7 +57,7 @@ class OPayService {
   async initializePayment({ reference, amount, currency = 'NGN', customerEmail, customerName, customerPhone, userId, items = [], expireAt = 600 }) {
     const total    = parseFloat(amount);
     const frontEnd = (process.env.CUSTOMER_APP_URL || '').replace(/\/$/, '');
-    const retUrl   = this.returnUrl || `${frontEnd}/payment/verify`;
+    const retUrl   = (this.returnUrl || `${frontEnd}/payment/verify`).replace(/\/+$/, '');
     const canUrl   = this.cancelUrl || `${frontEnd}/cart`;
     const cbUrl    = this.callbackUrl || '';
 
