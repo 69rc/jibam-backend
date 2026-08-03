@@ -104,6 +104,8 @@ class OPayService {
           quantity:    1,
         }];
 
+    const payMethod = process.env.OPAY_PAY_METHOD || null; // e.g. 'BankCard' for EG/PK, leave empty for NG
+
     const body = {
       amount: {
         currency,
@@ -113,8 +115,8 @@ class OPayService {
       cancelUrl:   this.cancelUrl   || `${process.env.CUSTOMER_APP_URL}/cart`,
       country:     this.country,
       expireAt,
-      merchantId:  this.merchantId,    // some OPay endpoints also require it in body
-      payMethod:   'BankCard',
+      merchantId:  this.merchantId,
+      ...(payMethod && { payMethod }),   // only include if explicitly set
       productList,
       reference,
       returnUrl:   this.returnUrl   || `${process.env.CUSTOMER_APP_URL}/payment/verify?reference=${reference}`,
