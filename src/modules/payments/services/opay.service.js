@@ -26,6 +26,8 @@ class OPayService {
 
     const url = `${this.baseUrl}${endpoint}`;
     console.log(`[OPay] POST ${url}`);
+    console.log(`[OPay] MerchantId header: "${this.merchantId}"`);
+    console.log(`[OPay] PublicKey: "${this.publicKey?.slice(0, 20)}..."`);
     console.log(`[OPay] Body:`, JSON.stringify(body, null, 2));
 
     try {
@@ -59,7 +61,9 @@ class OPayService {
   }) {
     const total      = parseFloat(amount);
     const frontEnd   = (process.env.CUSTOMER_APP_URL || '').replace(/\/$/, '');
-    const retUrl     = (this.returnUrl || `${frontEnd}/payment/verify`).replace(/\/+$/, '');
+    const retUrl     = (this.returnUrl || `${frontEnd}/payment/verify`)
+      .replace(/\/+$/, '')           // strip trailing slashes
+      .replace(/([^:])\/\/+/g, '$1/'); // collapse internal double slashes
     const canUrl     = this.cancelUrl || `${frontEnd}/cart`;
     const cbUrl      = this.callbackUrl || '';
 
