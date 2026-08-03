@@ -1,13 +1,7 @@
 /**
  * OPay Payment Service
- *
- * Supports two OPay endpoints:
- *  - Nigerian local:     /api/v1/cashier/create          (for NG merchants)
- *  - International:      /api/v1/international/cashier/create  (for EG/PK)
- *
- * Set OPAY_ENDPOINT_TYPE=local  for Nigeria
- * Set OPAY_ENDPOINT_TYPE=international  for Egypt/Pakistan
- * Default: local (NG)
+ * Uses OPay Checkout API
+ * Docs: https://documentation.opaycheckout.com/
  */
 
 import axios from 'axios';
@@ -23,10 +17,9 @@ class OPayService {
     this.cancelUrl     = (process.env.OPAY_CANCEL_URL  || '').replace(/\/$/, '');
     this.country       = process.env.OPAY_COUNTRY || 'NG';
     this.webhookSecret = process.env.OPAY_WEBHOOK_SECRET;
-    this.endpointType  = process.env.OPAY_ENDPOINT_TYPE || 'local'; // local | international
   }
 
-  // ─── HTTP helper ─────────────────────────────────────────────────────────
+  // ─── HTTP helper ──────────────────────────────────────────────────────────
   async _post(endpoint, body) {
     if (!this.publicKey)  throw new Error('OPAY_PUBLIC_KEY is not set');
     if (!this.merchantId) throw new Error('OPAY_MERCHANT_ID is not set');
@@ -54,106 +47,80 @@ class OPayService {
   }
 
   // ─── Initialize payment ───────────────────────────────────────────────────
-  async initializePayment({ reference, amount, currency = 'NGN', customerEmail, customerName, customerPhone, userId, items = [], expireAt = 600 }) {
-    const total    = parseFloat(amount);
-    const frontEnd = (process.env.CUSTOMER_APP_URL || '').replace(/\/$/, '');
-    const retUrl   = (this.returnUrl || `${frontEnd}/payment/verify`).replace(/\/+$/, '');
-    const canUrl   = this.cancelUrl || `${frontEnd}/cart`;
-    const cbUrl    = this.callbackUrl || '';
+  async initializePayment({
+    reference,
+    amount,
+    currency = 'NGN',
+    customerEmail,
+    customerName,
+    customerPhone,
+    userId,
+    items = [],
+  }) {
+    const total      = parseFloat(amount);
+    const frontEnd   = (process.env.CUSTOMER_APP_URL || '').replace(/\/$/, '');
+    const retUrl     = (this.returnUrl || `${frontEnd}/payment/verify`).replace(/\/+$/, '');
+    const canUrl     = this.cancelUrl || `${frontEnd}/cart`;
+    const cbUrl      = this.callbackUrl || '';
 
-    // Build product list
-    const productList = items.length > 0
-      ? items.map((item, idx) => ({
-          description: (item.productName || item.name || 'Medicine').slice(0, 100),
-          imageUrl:    item.productImage || item.image || 'https://placehold.co/100',
-          name:        (item.productName || item.name || 'Product').slice(0, 50),
-          price:       parseFloat(item.price),
-          productId:   String(item.productId || item.id || `p${idx}`).slice(0, 50),
-          quantity:    parseInt(item.quantity) || 1,
-        }))
-      : [{
-          description: 'Jibam Pharmacy Order',
-          imageUrl:    'https://placehold.co/100',
-          name:        'Pharmacy Products',
-          price:       total,
-          productId:   reference.slice(0, 50),
-          quantity:    1,
-        }];
+    // Build product name/description from order items
+    const productName = items.length > 0
+      ? items.map((i) => i.productName || i.name).filter(Boolean).slice(0, 3).join(', ')
+      : 'Jibam Pharmacy Order';
 
-    let data;
+    // ── Exact format from OPay docs ──
+    const payload = {
+      country:     this.country,
+      reference,
+      amount: {
+        total:    total,
+        currency: currency,
+      },
+      callbackUrl: cbUrl,
+      returnUrl:   `${retUrl}?reference=${reference}`,
+      cancelUrl:   canUrl,
+      product: {
+        name:        productName.slice(0, 100),
+        description: `Order from Jibam Pharmacy — ${items.length} item${items.length !== 1 ? 's' : ''}`,
+      },
+      userInfo: {
+        userEmail:  customerEmail || '',
+        userId:     String(userId  || ''),
+        userMobile: customerPhone  || '',
+        userName:   customerName   || '',
+      },
+    };
 
-    if (this.endpointType === 'international') {
-      // ── International cashier (EG/PK) ──
-      const body = {
-        amount:      { currency, total },
-        callbackUrl: cbUrl,
-        cancelUrl:   canUrl,
-        country:     this.country,
-        expireAt,
-        merchantId:  this.merchantId,
-        productList,
-        reference,
-        returnUrl:   `${retUrl}?reference=${reference}`,
-        userInfo: {
-          userEmail:  customerEmail  || '',
-          userId:     String(userId  || ''),
-          userMobile: customerPhone  || '',
-          userName:   customerName   || '',
-        },
-      };
-      data = await this._post('/api/v1/international/cashier/create', body);
-
-    } else {
-      // ── Nigerian local cashier (NG) ──
-      // Amount in kobo (smallest unit) for local Nigerian endpoint
-      const amountKobo = Math.round(total * 100);
-
-      const body = {
-        amount:     { currency, total: amountKobo },
-        callbackUrl: cbUrl,
-        cancelUrl:   canUrl,
-        country:     this.country,
-        expireAt,
-        productList,
-        reference,
-        returnUrl:   `${retUrl}?reference=${reference}`,
-        userInfo: {
-          userEmail:  customerEmail || '',
-          userId:     String(userId  || ''),
-          userMobile: customerPhone  || '',
-          userName:   customerName   || '',
-        },
-      };
-      data = await this._post('/api/v1/cashier/create', body);
-    }
+    const data = await this._post('/api/v1/international/cashier/create', payload);
 
     if (data.code !== '00000') {
-      throw new Error(`OPay [${data.code}]: ${data.message || data.msg || 'Unknown error'}`);
+      throw new Error(`OPay [${data.code}]: ${data.message || data.msg || 'Payment initialization failed'}`);
     }
 
     return {
       success:    true,
-      cashierUrl: data.data?.cashierUrl || data.data?.url,
+      cashierUrl: data.data?.cashierUrl || data.data?.url || data.data?.payUrl,
       reference,
       expireAt:   data.data?.expireAt,
       raw:        data.data,
     };
   }
 
-  // ─── Verify payment ───────────────────────────────────────────────────────
+  // ─── Verify / query payment ───────────────────────────────────────────────
   async verifyPayment(reference) {
-    const endpoint = this.endpointType === 'international'
-      ? '/api/v1/international/cashier/query'
-      : '/api/v1/cashier/query';
+    const body = {
+      country:   this.country,
+      reference,
+    };
 
-    const body = { country: this.country, reference };
-    const data = await this._post(endpoint, body);
+    const data = await this._post('/api/v1/international/cashier/query', body);
 
     if (data.code !== '00000') {
       throw new Error(`OPay query [${data.code}]: ${data.message || 'Query failed'}`);
     }
 
     const status = (data.data?.status || data.data?.orderStatus || '').toUpperCase();
+
     return {
       success:       status === 'SUCCESS',
       status:        status.toLowerCase(),
@@ -168,22 +135,17 @@ class OPayService {
 
   // ─── Refund ───────────────────────────────────────────────────────────────
   async refundPayment(reference, amount, reason = 'Customer request') {
-    const endpoint = this.endpointType === 'international'
-      ? '/api/v1/international/cashier/refund'
-      : '/api/v1/cashier/refund';
-
     const body = {
       country:   this.country,
       reference,
-      amount:    { total: parseFloat(amount), currency: 'NGN' },
+      amount: { total: parseFloat(amount), currency: 'NGN' },
       reason,
     };
-
-    const data = await this._post(endpoint, body);
+    const data = await this._post('/api/v1/international/cashier/refund', body);
     return { success: data.code === '00000', message: data.message, raw: data.data };
   }
 
-  // ─── Webhook verification ─────────────────────────────────────────────────
+  // ─── Webhook signature verification ──────────────────────────────────────
   verifyWebhookSignature(payload, receivedSignature) {
     if (!this.webhookSecret || !receivedSignature) return false;
     const expected = crypto
