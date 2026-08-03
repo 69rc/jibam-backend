@@ -32,25 +32,34 @@ class OPayService {
 
   // ─── HTTP helper ───────────────────────────────────────────────────────────
   async _post(endpoint, body) {
-    // Validate required env vars before making any request
-    if (!this.publicKey) throw new Error('OPAY_PUBLIC_KEY is not set in environment variables');
+    if (!this.publicKey)  throw new Error('OPAY_PUBLIC_KEY is not set in environment variables');
     if (!this.merchantId) throw new Error('OPAY_MERCHANT_ID is not set in environment variables');
 
     const url = `${this.baseUrl}${endpoint}`;
 
     console.log(`[OPay] POST ${url}`);
     console.log(`[OPay] MerchantId: ${this.merchantId}`);
-    console.log(`[OPay] PublicKey starts with: ${this.publicKey?.slice(0, 12)}...`);
+    console.log(`[OPay] Request body:`, JSON.stringify(body, null, 2));
 
-    const response = await axios.post(url, body, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.publicKey}`,
-        'MerchantId': this.merchantId,          // exact header name OPay expects
-      },
-      timeout: 30000,
-    });
-    return response.data;
+    try {
+      const response = await axios.post(url, body, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.publicKey}`,
+          'MerchantId': this.merchantId,
+        },
+        timeout: 30000,
+      });
+      console.log(`[OPay] Response status: ${response.status}`);
+      console.log(`[OPay] Response data:`, JSON.stringify(response.data, null, 2));
+      return response.data;
+    } catch (err) {
+      // Surface the actual OPay error response
+      const opayError = err.response?.data;
+      console.error(`[OPay] HTTP error ${err.response?.status}:`, JSON.stringify(opayError, null, 2));
+      const message = opayError?.message || opayError?.msg || err.message || 'OPay request failed';
+      throw new Error(message);
+    }
   }
 
   // ─── Initialize cashier payment ────────────────────────────────────────────
@@ -89,15 +98,15 @@ class OPayService {
     const productList = items.length > 0
       ? items.map((item, idx) => ({
           description: item.productName || item.name || 'Medicine',
-          imageUrl:    item.productImage || item.image || 'https://via.placeholder.com/100',
-          name:        item.productName || item.name || 'Product',
+          imageUrl:    item.productImage || item.image || 'https://placehold.co/100x100',
+          name:        (item.productName || item.name || 'Product').slice(0, 50),
           price:       parseFloat(item.price),
-          productId:   item.productId || item.id || `product_${idx}`,
-          quantity:    item.quantity || 1,
+          productId:   String(item.productId || item.id || `p${idx}`),
+          quantity:    parseInt(item.quantity) || 1,
         }))
       : [{
           description: 'Jibam Pharmacy Order',
-          imageUrl:    'https://via.placeholder.com/100',
+          imageUrl:    'https://placehold.co/100x100',
           name:        'Pharmacy Products',
           price:       parseFloat(amountValue),
           productId:   reference,
@@ -130,9 +139,11 @@ class OPayService {
 
     const data = await this._post('/api/v1/international/cashier/create', body);
 
+    console.log('[OPay] cashier/create response:', JSON.stringify(data, null, 2));
+
     // OPay success code is '00000'
     if (data.code !== '00000') {
-      throw new Error(data.message || 'OPay cashier creation failed');
+      throw new Error(data.message || data.msg || `OPay error code: ${data.code}`);
     }
 
     return {
