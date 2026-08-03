@@ -46,6 +46,11 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 const isProduction = process.env.NODE_ENV === 'production';
 
+// ─── Trust proxy (required for Vercel / any reverse proxy) ────────────────────
+// Tells Express to trust X-Forwarded-For headers from the proxy layer.
+// This fixes express-rate-limit's ERR_ERL_UNEXPECTED_X_FORWARDED_FOR error.
+app.set('trust proxy', 1);
+
 // ─── Security & Parsing Middleware ────────────────────────────────────────────
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
