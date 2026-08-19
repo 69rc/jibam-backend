@@ -15,6 +15,8 @@ import Notification from './Notification.js';
 import Review from './Review.js';
 import PromoCode from './PromoCode.js';
 
+import StoreSettings from './StoreSettings.js';
+
 // ─── User Associations ───────────────────────────────────────────────────────
 User.hasOne(Cart, { foreignKey: 'userId', as: 'cart', onDelete: 'CASCADE' });
 User.hasMany(Order, { foreignKey: 'userId', as: 'orders' });
@@ -94,4 +96,5 @@ export {
   Notification,
   Review,
   PromoCode,
+  StoreSettings,
 };

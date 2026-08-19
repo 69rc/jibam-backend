@@ -26,6 +26,7 @@ import wishlistRoutes from './routes/wishlist.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 import addressRoutes from './routes/address.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import settingsRoutes from './routes/settings.routes.js';
 
 dotenv.config();
 
@@ -179,6 +180,7 @@ app.use(`${API}/wishlist`,      wishlistRoutes);
 app.use(`${API}/notifications`, notificationRoutes);
 app.use(`${API}/addresses`,     addressRoutes);
 app.use(`${API}/admin`,         adminRoutes);
+app.use(`${API}/settings`,      settingsRoutes);
 
 // ─── 404 & Error Handlers ─────────────────────────────────────────────────────
 app.use(notFound);
