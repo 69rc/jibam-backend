@@ -10,7 +10,26 @@ import {
 import { sendOrderConfirmationEmail, sendPharmacistOrderAlert } from '../utils/email.js';
 import { notifyPharmacistNewOrder } from '../utils/whatsapp.js';
 
-const DELIVERY_FEE = 500; // ₦500 flat delivery fee
+import StoreSettings from '../models/StoreSettings.js';
+
+const DEFAULT_DELIVERY_FEE = 500;
+
+// Fetch delivery fee from DB zones based on city (zone label)
+const getDeliveryFeeForCity = async (city = '') => {
+  try {
+    const setting = await StoreSettings.findOne({ where: { key: 'delivery_zones' } });
+    if (!setting) return DEFAULT_DELIVERY_FEE;
+    const zones = JSON.parse(setting.value);
+    const c = city.trim().toLowerCase();
+    const match = zones.find((z) =>
+      z.label.toLowerCase() === c ||
+      (z.areas || []).some((a) => c.includes(a) || a.includes(c))
+    );
+    return match ? Number(match.fee) : DEFAULT_DELIVERY_FEE;
+  } catch {
+    return DEFAULT_DELIVERY_FEE;
+  }
+};
 
 // POST /orders — create order from cart
 export const createOrder = async (req, res, next) => {
@@ -20,6 +39,7 @@ export const createOrder = async (req, res, next) => {
       deliveryAddress,
       deliveryPhone,
       deliveryInstructions,
+      deliveryCity,   // zone label sent from frontend e.g. "Central Kano"
       promoCode,
     } = req.body;
 
@@ -60,7 +80,7 @@ export const createOrder = async (req, res, next) => {
       subtotal += parseFloat(item.product.price) * item.quantity;
     }
 
-    const deliveryFee = DELIVERY_FEE;
+    const deliveryFee = await getDeliveryFeeForCity(deliveryCity || '');
     let discount = 0;
 
     // Generate order number in controller (most reliable approach)
