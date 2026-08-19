@@ -1,5 +1,17 @@
 import StoreSettings from '../models/StoreSettings.js';
 
+// Ensure the table exists (handles first deploy without running migrations manually)
+let tableReady = false;
+const ensureTable = async () => {
+  if (tableReady) return;
+  try {
+    await StoreSettings.sync({ force: false }); // CREATE TABLE IF NOT EXISTS
+    tableReady = true;
+  } catch (err) {
+    console.error('StoreSettings sync error:', err.message);
+  }
+};
+
 // Default delivery zones (used when DB has no value yet)
 const DEFAULT_DELIVERY_ZONES = [
   {
@@ -38,6 +50,7 @@ const DEFAULT_DELIVERY_ZONES = [
 // ── GET /api/v1/settings/delivery-zones  (public) ────────────────────────────
 export const getDeliveryZones = async (req, res) => {
   try {
+    await ensureTable();
     const setting = await StoreSettings.findOne({ where: { key: 'delivery_zones' } });
     const zones = setting ? JSON.parse(setting.value) : DEFAULT_DELIVERY_ZONES;
     res.json({ status: 'success', data: zones });
@@ -50,6 +63,7 @@ export const getDeliveryZones = async (req, res) => {
 // ── PUT /api/v1/admin/settings/delivery-zones  (admin only) ──────────────────
 export const updateDeliveryZones = async (req, res) => {
   try {
+    await ensureTable();
     const { zones } = req.body;
 
     if (!Array.isArray(zones) || zones.length === 0) {
@@ -90,6 +104,7 @@ export const updateDeliveryZones = async (req, res) => {
 // ── GET /api/v1/admin/settings  (admin — all settings) ───────────────────────
 export const getAllSettings = async (req, res) => {
   try {
+    await ensureTable();
     const settings = await StoreSettings.findAll();
     const parsed = {};
     for (const s of settings) {
