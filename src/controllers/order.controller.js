@@ -9,6 +9,7 @@ import {
 } from '../utils/apiResponse.js';
 import { sendOrderConfirmationEmail, sendPharmacistOrderAlert } from '../utils/email.js';
 import { notifyPharmacistNewOrder } from '../utils/whatsapp.js';
+import { sendTelegramMessage, formatOrderAlert } from '../utils/telegram.js';
 
 import StoreSettings from '../models/StoreSettings.js';
 
@@ -189,6 +190,9 @@ export const createOrder = async (req, res, next) => {
 
     // Send WhatsApp notification to pharmacist (non-blocking, optional)
     notifyPharmacistNewOrder(fullOrder, req.user).catch(console.error);
+
+    // Send Telegram notification to pharmacist (free, instant)
+    sendTelegramMessage(formatOrderAlert(fullOrder, req.user)).catch(console.error);
 
     return successResponse(res, fullOrder, 'Order created successfully', 201);
   } catch (error) {

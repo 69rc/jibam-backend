@@ -120,8 +120,33 @@ const sendViaCallMeBot = async (to, message) => {
 };
 
 /**
- * Send via Twilio WhatsApp Sandbox / Business
+ * Send via UltraMsg (free tier: 100 msgs/month, no manual setup needed)
+ * Sign up free at https://ultramsg.com → get instance_id + token
+ * Set: WHATSAPP_PROVIDER=ultramsg
+ *      ULTRAMSG_INSTANCE_ID=instance12345
+ *      ULTRAMSG_TOKEN=your_token
  */
+const sendViaUltraMsg = async (to, message) => {
+  const instanceId = process.env.ULTRAMSG_INSTANCE_ID;
+  const token = process.env.ULTRAMSG_TOKEN;
+
+  if (!instanceId || !token) {
+    throw new Error('ULTRAMSG_INSTANCE_ID or ULTRAMSG_TOKEN not set. Sign up free at https://ultramsg.com');
+  }
+
+  const phone = to.startsWith('+') ? to : `+${to}`;
+
+  const response = await axios.post(
+    `https://api.ultramsg.com/${instanceId}/messages/chat`,
+    new URLSearchParams({ token, to: phone, body: message }),
+    {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 15000,
+    }
+  );
+
+  return response.data;
+};
 const sendViaTwilio = async (to, message) => {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -166,6 +191,9 @@ export const sendWhatsAppNotification = async (to, message) => {
         break;
       case 'callmebot':
         await sendViaCallMeBot(recipient, message);
+        break;
+      case 'ultramsg':
+        await sendViaUltraMsg(recipient, message);
         break;
       case 'twilio':
         await sendViaTwilio(recipient, message);

@@ -7,6 +7,7 @@ import {
   getAllSettings, updateDeliveryZones, updatePromoBanners,
 } from '../controllers/settings.controller.js';
 import { sendTestWhatsApp } from '../utils/whatsapp.js';
+import { sendTelegramMessage, sendTelegramTestMessage } from '../utils/telegram.js';
 import { protect, restrictTo } from '../middlewares/auth.js';
 
 const router = Router();
@@ -27,6 +28,16 @@ router.post('/test-whatsapp', async (req, res) => {
   try {
     await sendTestWhatsApp();
     res.json({ status: 'success', message: 'Test WhatsApp sent — check your phone' });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+// ── Telegram test ─────────────────────────────────────────────────────────────
+router.post('/test-telegram', async (req, res) => {
+  try {
+    await sendTelegramTestMessage();
+    res.json({ status: 'success', message: 'Test Telegram message sent — check your Telegram' });
   } catch (err) {
     res.status(500).json({ status: 'error', message: err.message });
   }

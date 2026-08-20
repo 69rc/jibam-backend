@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import { Order, Payment, Notification, User, OrderItem } from '../models/index.js';
 import { sendOrderConfirmationEmail, sendPharmacistPaymentAlert } from '../utils/email.js';
 import { sendWhatsAppNotification } from '../utils/whatsapp.js';
+import { sendTelegramMessage, formatPaymentAlert } from '../utils/telegram.js';
 import { fulfillOrderItems } from '../utils/paymentFulfillment.js';
 
 // ── Signature verification ───────────────────────────────────────────────────
@@ -110,6 +111,9 @@ const handleChargeSuccess = async (data) => {
 
   // Email to pharmacist
   sendPharmacistPaymentAlert(order, customer, data.channel).catch(console.error);
+
+  // Telegram alert — payment confirmed
+  sendTelegramMessage(formatPaymentAlert(order, customer, data.channel)).catch(console.error);
 };
 
 // ── Main webhook handler ──────────────────────────────────────────────────────
