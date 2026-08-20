@@ -90,18 +90,30 @@ const sendViaMeta = async (to, message) => {
 
 /**
  * Send via CallMeBot (free, requires one-time setup)
- * Setup: send "I allow callmebot to send me messages" to +34 644 59 87 23 on WhatsApp
+ *
+ * SETUP (one time, takes 2 minutes):
+ * 1. Save +34 644 59 87 23 in your phone contacts as "CallMeBot"
+ * 2. Send this exact message to that number on WhatsApp:
+ *    "I allow callmebot to send me messages"
+ * 3. You'll receive a reply with your API key in seconds
+ * 4. Add that key to CALLMEBOT_APIKEY in your .env
  */
 const sendViaCallMeBot = async (to, message) => {
   const apiKey = process.env.CALLMEBOT_APIKEY;
 
-  if (!apiKey) throw new Error('CALLMEBOT_APIKEY not set');
+  if (!apiKey || apiKey === 'your_callmebot_apikey') {
+    throw new Error(
+      'CALLMEBOT_APIKEY not configured. ' +
+      'Setup: WhatsApp "I allow callmebot to send me messages" to +34 644 59 87 23'
+    );
+  }
 
   const phone = to.replace(/^\+/, '');
   const encodedMsg = encodeURIComponent(message);
 
   const response = await axios.get(
-    `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodedMsg}&apikey=${apiKey}`
+    `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encodedMsg}&apikey=${apiKey}`,
+    { timeout: 15000 }
   );
 
   return response.data;
@@ -176,4 +188,19 @@ export const notifyPharmacistNewOrder = async (order, customer) => {
   const message = formatOrderMessage(order, customer);
   const pharmacistNumber = process.env.PHARMACIST_WHATSAPP;
   await sendWhatsAppNotification(pharmacistNumber, message);
+};
+
+/**
+ * Send a test WhatsApp message to verify setup is working
+ * Called from GET /api/v1/admin/test-whatsapp
+ */
+export const sendTestWhatsApp = async () => {
+  const to = process.env.PHARMACIST_WHATSAPP;
+  const provider = process.env.WHATSAPP_PROVIDER || 'not set';
+  const message =
+    `✅ *WhatsApp Test — Jibam Pharmacy*\n\n` +
+    `Provider: ${provider}\n` +
+    `Time: ${new Date().toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}\n\n` +
+    `_If you receive this, WhatsApp notifications are working correctly._`;
+  await sendWhatsAppNotification(to, message);
 };
