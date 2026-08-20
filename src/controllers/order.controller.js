@@ -160,14 +160,10 @@ export const createOrder = async (req, res, next) => {
 
     await OrderItem.bulkCreate(orderItems, { transaction: t });
 
-    // Deduct stock
-    for (const item of cart.items) {
-      await item.product.decrement('stock', { by: item.quantity, transaction: t });
-      await item.product.increment('totalSold', { by: item.quantity, transaction: t });
-    }
-
-    // Clear cart
-    await CartItem.destroy({ where: { cartId: cart.id }, transaction: t });
+    // NOTE: We intentionally do NOT deduct stock or clear the cart here.
+    // Stock is only reserved/deducted AFTER the customer pays (see
+    // payment/webhook/verify fulfillment), so unpaid orders never reduce
+    // inventory and the cart stays intact until payment is confirmed.
 
     await t.commit();
 

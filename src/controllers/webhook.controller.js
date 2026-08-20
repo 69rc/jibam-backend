@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import { Order, Payment, Notification, User, OrderItem } from '../models/index.js';
 import { sendOrderConfirmationEmail, sendPharmacistPaymentAlert } from '../utils/email.js';
 import { sendWhatsAppNotification } from '../utils/whatsapp.js';
+import { fulfillOrderItems } from '../utils/paymentFulfillment.js';
 
 // ── Signature verification ───────────────────────────────────────────────────
 const verifySignature = (rawBody, signature) => {
@@ -67,6 +68,9 @@ const handleChargeSuccess = async (data) => {
     paymentStatus: 'paid',
     paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
   });
+
+  // Now that payment is confirmed: deduct stock + remove purchased cart items
+  await fulfillOrderItems(order.id, payment.userId);
 
   console.log(`[Webhook] ✅ Order ${order.orderNumber} marked as PAID`);
 

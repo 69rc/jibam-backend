@@ -3,6 +3,7 @@ import { Order, Payment, PaymentLog, Notification, Product, OrderItem, User } fr
 import opayService from '../services/opay.service.js';
 import { successResponse, errorResponse } from '../../../utils/apiResponse.js';
 import { sendPharmacistPaymentAlert } from '../../../utils/email.js';
+import { fulfillOrderItems } from '../../../utils/paymentFulfillment.js';
 
 // ─── helper: log payment event ────────────────────────────────────────────────
 async function logEvent(paymentId, event, req, responsePayload, status = 'success', errorMessage = null) {
@@ -32,6 +33,9 @@ async function fulfillOrder(orderId, transactionId, channel, paymentId, userId, 
     paymentStatus: 'paid',
     paidAt: new Date(),
   });
+
+  // Now that payment is confirmed: deduct stock + remove purchased cart items
+  await fulfillOrderItems(orderId, userId);
 
   // Create in-app notification
   Notification.create({

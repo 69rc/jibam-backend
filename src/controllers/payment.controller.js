@@ -4,6 +4,7 @@ import { initializeTransaction, verifyTransaction } from '../services/paystack.s
 import { successResponse, errorResponse } from '../utils/apiResponse.js';
 import { sendOrderConfirmationEmail, sendPharmacistPaymentAlert } from '../utils/email.js';
 import { sendWhatsAppNotification } from '../utils/whatsapp.js';
+import { fulfillOrderItems } from '../utils/paymentFulfillment.js';
 
 // POST /payments/initialize
 export const initializePayment = async (req, res, next) => {
@@ -112,6 +113,9 @@ export const verifyPayment = async (req, res, next) => {
       paymentStatus: 'paid',
       paidAt: new Date(paystackResponse.data.paid_at),
     });
+
+    // Now that payment is confirmed: deduct stock + remove purchased cart items
+    await fulfillOrderItems(order.id, payment.userId);
 
     // Fetch customer info
     const customer = await User.findByPk(payment.userId, {
