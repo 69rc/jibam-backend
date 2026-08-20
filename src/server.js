@@ -106,6 +106,27 @@ app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
 
 app.use(compression());
+
+// ─── Paystack webhook raw body ────────────────────────────────────────────────
+// CRITICAL: Paystack signs its webhook payloads with HMAC-SHA512 over the RAW
+// request body. If we let express.json() parse the body first, the raw stream
+// is consumed and req.rawBody comes back empty — signature verification fails
+// and orders are never automatically marked as PAID.
+// Register this BEFORE express.json() so we capture the untouched body.
+app.post(
+  '/api/v1/payments/webhook',
+  express.raw({ type: 'application/json', limit: '2mb' }),
+  (req, res, next) => {
+    req.rawBody = req.body.toString('utf8');
+    try {
+      req.body = JSON.parse(req.rawBody);
+    } catch {
+      req.body = {};
+    }
+    next();
+  }
+);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan(isProduction ? 'combined' : 'dev'));

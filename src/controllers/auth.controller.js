@@ -46,12 +46,12 @@ export const login = async (req, res, next) => {
 
     const user = await User.findOne({ where: { email } });
     if (!user) {
-      return errorResponse(res, 'Invalid email or password', 401);
+      return errorResponse(res, 'No account found with this email', 401);
     }
 
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
-      return errorResponse(res, 'Invalid email or password', 401);
+      return errorResponse(res, 'Incorrect password', 401);
     }
 
     if (!user.isActive) {
@@ -188,7 +188,13 @@ export const forgotPassword = async (req, res, next) => {
     });
 
     const resetUrl = `${process.env.CUSTOMER_APP_URL}/reset-password?token=${resetToken}`;
-    await sendPasswordResetEmail(user, resetUrl);
+    // Wrap in try/catch so an SMTP failure never breaks the request — the
+    // customer always gets a success message (and logs help us debug).
+    try {
+      await sendPasswordResetEmail(user, resetUrl);
+    } catch (emailErr) {
+      console.error('[forgotPassword] Failed to send reset email:', emailErr.message);
+    }
 
     return successResponse(res, null, 'If this email exists, a reset link has been sent');
   } catch (error) {

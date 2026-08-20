@@ -30,6 +30,7 @@ export const initializePayment = async (req, res, next) => {
       email: req.user.email,
       amount: parseFloat(order.total),
       reference,
+      fallbackOrigin: req.headers.origin,
       metadata: {
         orderId: order.id,
         orderNumber: order.orderNumber,
@@ -76,7 +77,12 @@ export const verifyPayment = async (req, res, next) => {
     if (!payment) return errorResponse(res, 'Payment record not found', 404);
 
     if (payment.status === 'success') {
-      return successResponse(res, payment, 'Payment already verified');
+      // Include the order so the frontend always knows the current state,
+      // even when the webhook already confirmed the payment before verify.
+      const order = await Order.findByPk(payment.orderId, {
+        attributes: ['id', 'orderNumber', 'status', 'paymentStatus', 'total'],
+      });
+      return successResponse(res, { payment, order }, 'Payment already verified');
     }
 
     // Verify with Paystack
