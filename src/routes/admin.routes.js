@@ -33,7 +33,18 @@ router.post('/test-whatsapp', async (req, res) => {
   }
 });
 
-// ── Telegram test ─────────────────────────────────────────────────────────────
+// ── Email test ────────────────────────────────────────────────────────────────
+router.post('/test-email', async (req, res) => {
+  try {
+    const { sendPasswordResetEmail } = await import('../utils/email.js');
+    const fakeUser = { fullname: 'Admin Test', email: process.env.PHARMACIST_EMAIL || process.env.ADMIN_EMAIL };
+    const fakeUrl = `${process.env.CUSTOMER_APP_URL}/reset-password?token=test-token-123`;
+    await sendPasswordResetEmail(fakeUser, fakeUrl);
+    res.json({ status: 'success', message: `Test email sent to ${fakeUser.email}` });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
 router.post('/test-telegram', async (req, res) => {
   try {
     await sendTelegramTestMessage();
