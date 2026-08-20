@@ -12,9 +12,15 @@ const ensureTable = async () => {
   }
 };
 
+// Default promo banners
+const DEFAULT_PROMO_BANNERS = [
+  { id: '1', title: 'Up to 20% Off', subtitle: 'On selected antibiotics', color: 'primary', active: true },
+  { id: '2', title: 'Free Delivery', subtitle: 'On orders above ₦5,000', color: 'accent', active: true },
+  { id: '3', title: 'New Arrivals', subtitle: 'Fresh stock every week', color: 'primary-light', active: true },
+];
+
 // Default delivery zones (used when DB has no value yet)
-const DEFAULT_DELIVERY_ZONES = [
-  {
+const DEFAULT_DELIVERY_ZONES = [  {
     id: 'zone1',
     label: 'Central Kano',
     fee: 300,
@@ -101,7 +107,47 @@ export const updateDeliveryZones = async (req, res) => {
   }
 };
 
-// ── GET /api/v1/admin/settings  (admin — all settings) ───────────────────────
+// ── GET /api/v1/settings/promo-banners  (public) ────────────────────────────
+export const getPromoBanners = async (req, res) => {
+  try {
+    await ensureTable();
+    const setting = await StoreSettings.findOne({ where: { key: 'promo_banners' } });
+    const banners = setting ? JSON.parse(setting.value) : DEFAULT_PROMO_BANNERS;
+    res.json({ status: 'success', data: banners });
+  } catch (err) {
+    console.error('getPromoBanners error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch banners' });
+  }
+};
+
+// ── PUT /api/v1/admin/settings/promo-banners  (admin only) ───────────────────
+export const updatePromoBanners = async (req, res) => {
+  try {
+    await ensureTable();
+    const { banners } = req.body;
+
+    if (!Array.isArray(banners)) {
+      return res.status(400).json({ status: 'error', message: 'banners must be an array' });
+    }
+
+    for (const b of banners) {
+      if (!b.title || !b.subtitle) {
+        return res.status(400).json({ status: 'error', message: 'Each banner needs a title and subtitle' });
+      }
+    }
+
+    const [setting] = await StoreSettings.upsert({
+      key: 'promo_banners',
+      value: JSON.stringify(banners),
+      description: 'Homepage promotional banner cards',
+    });
+
+    res.json({ status: 'success', message: 'Banners updated', data: JSON.parse(setting.value) });
+  } catch (err) {
+    console.error('updatePromoBanners error:', err);
+    res.status(500).json({ status: 'error', message: 'Failed to update banners' });
+  }
+};
 export const getAllSettings = async (req, res) => {
   try {
     await ensureTable();

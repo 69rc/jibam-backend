@@ -4,7 +4,7 @@ import {
   toggleUserStatus, getSalesAnalytics,
 } from '../controllers/admin.controller.js';
 import {
-  getAllSettings, updateDeliveryZones,
+  getAllSettings, updateDeliveryZones, updatePromoBanners,
 } from '../controllers/settings.controller.js';
 import { sendTestWhatsApp } from '../utils/whatsapp.js';
 import { protect, restrictTo } from '../middlewares/auth.js';
@@ -20,6 +20,7 @@ router.get('/analytics/sales', getSalesAnalytics);
 // ── Store Settings ────────────────────────────────────────────────────────────
 router.get('/settings', getAllSettings);
 router.put('/settings/delivery-zones', updateDeliveryZones);
+router.put('/settings/promo-banners', updatePromoBanners);
 
 // ── WhatsApp test ─────────────────────────────────────────────────────────────
 router.post('/test-whatsapp', async (req, res) => {

@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import { getDeliveryZones } from '../controllers/settings.controller.js';
+import { getDeliveryZones, getPromoBanners } from '../controllers/settings.controller.js';
 
 const router = Router();
 
-// Public — customer app fetches delivery zones
+// Public — customer app fetches these
 router.get('/delivery-zones', getDeliveryZones);
+router.get('/promo-banners', getPromoBanners);
 
 export default router;
