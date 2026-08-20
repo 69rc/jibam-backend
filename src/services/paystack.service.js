@@ -37,13 +37,15 @@ paystackAxios.interceptors.response.use(
 );
 
 // ─── Initialize transaction ────────────────────────────────────────────────
-export const initializeTransaction = async ({ email, amount, reference, metadata = {} }) => {
+export const initializeTransaction = async ({ email, amount, reference, metadata = {}, fallbackOrigin = '' }) => {
   if (!process.env.PAYSTACK_SECRET_KEY || process.env.PAYSTACK_SECRET_KEY.includes('your_')) {
     throw new Error('PAYSTACK_SECRET_KEY is not configured. Add it to your environment variables.');
   }
 
-  const frontendUrl = (process.env.CUSTOMER_APP_URL || '').replace(/\/$/, '');
-  const callbackUrl = `${frontendUrl}/payment/callback`;
+  // Use explicit PAYSTACK_CALLBACK_URL if set, otherwise build from CUSTOMER_APP_URL
+  const callbackUrl =
+    process.env.PAYSTACK_CALLBACK_URL ||
+    `${(process.env.CUSTOMER_APP_URL || '').replace(/\/$/, '')}/payment/callback`;
 
   const response = await paystackAxios.post('/transaction/initialize', {
     email,
