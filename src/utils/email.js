@@ -2,15 +2,60 @@ import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT) || 587,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+/**
+ * Email transporter — supports Gmail SMTP and Resend SMTP relay
+ *
+ * ── Option A: Gmail (free) ────────────────────────────────────────────
+ *  SMTP_PROVIDER=gmail  (or leave blank)
+ *  SMTP_USER=your-gmail@gmail.com
+ *  SMTP_PASS=your-16-char-app-password   ← Google → Security → App Passwords
+ *
+ * ── Option B: Resend (3,000 emails/month free) ────────────────────────
+ *  SMTP_PROVIDER=resend
+ *  SMTP_USER=resend                      ← literal string "resend"
+ *  SMTP_PASS=re_xxxxxxxxxxxxxxxxxxxxxxx  ← Resend API key from resend.com
+ *  SMTP_FROM=Jibam Pharmacy <noreply@yourdomain.com>
+ *
+ *  Resend SMTP relay: host=smtp.resend.com  port=587
+ * ─────────────────────────────────────────────────────────────────────
+ */
+
+const isResend = (process.env.SMTP_PROVIDER || '').toLowerCase() === 'resend';
+
+const transportConfig = isResend
+  ? {
+      host: 'smtp.resend.com',
+      port: 587,
+      secure: false,
+      auth: {
+        user: 'resend',
+        pass: process.env.SMTP_PASS,
+      },
+    }
+  : {
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT) || 587,
+      secure: false,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    };
+
+const transporter = nodemailer.createTransport(transportConfig);
+
+// Default FROM address
+const FROM_ADDRESS = process.env.SMTP_FROM ||
+  `"Jibam Pharmacy" <${process.env.SMTP_USER || 'noreply@jibampharmacy.com'}>`;
+
+/**
+ * Check if email is configured before trying to send
+ */
+const isEmailConfigured = () => {
+  if (!process.env.SMTP_PASS || process.env.SMTP_PASS === 'your_app_password') return false;
+  if (!isResend && (!process.env.SMTP_USER || process.env.SMTP_USER.includes('your_email'))) return false;
+  return true;
+};
 
 // ─── Brand colors ─────────────────────────────────────────────────────────────
 const NAVY  = '#0D1B5E';
@@ -73,6 +118,10 @@ const baseTemplate = (content) => `
 
 // ─── Welcome email ────────────────────────────────────────────────────────────
 export const sendWelcomeEmail = async (user) => {
+  if (!isEmailConfigured()) {
+    console.warn('[Email] SMTP not configured — skipping welcome email');
+    return;
+  }
   const html = baseTemplate(`
     <h2>Welcome, ${user.fullname}! 🎉</h2>
     <p>Your Jibam Pharmacy account has been created. You can now browse and order quality medicines delivered to your doorstep across Nigeria.</p>
@@ -80,7 +129,7 @@ export const sendWelcomeEmail = async (user) => {
     <p>If you did not create this account, please contact us immediately.</p>
   `);
   await transporter.sendMail({
-    from: `"Jibam Pharmacy" <${process.env.SMTP_USER}>`,
+    from: FROM_ADDRESS,
     to: user.email,
     subject: 'Welcome to Jibam Pharmacy 🏥',
     html,
@@ -89,15 +138,21 @@ export const sendWelcomeEmail = async (user) => {
 
 // ─── Password reset email ─────────────────────────────────────────────────────
 export const sendPasswordResetEmail = async (user, resetUrl) => {
+  if (!isEmailConfigured()) {
+    console.warn('[Email] SMTP not configured — skipping password reset email');
+    console.warn('[Email] Reset URL (log for dev):', resetUrl);
+    return;
+  }
   const html = baseTemplate(`
     <h2>Reset Your Password</h2>
     <p>Hi <strong>${user.fullname}</strong>,</p>
     <p>We received a request to reset your Jibam Pharmacy account password. Click the button below — the link expires in <strong>1 hour</strong>.</p>
     <a class="btn" href="${resetUrl}">Reset Password</a>
     <div class="alert warn">If you didn't request this, you can safely ignore this email. Your password won't change.</div>
+    <p style="font-size:12px;color:#999;word-break:break-all;">Or copy this link: ${resetUrl}</p>
   `);
   await transporter.sendMail({
-    from: `"Jibam Pharmacy" <${process.env.SMTP_USER}>`,
+    from: FROM_ADDRESS,
     to: user.email,
     subject: 'Password Reset — Jibam Pharmacy',
     html,
@@ -106,6 +161,10 @@ export const sendPasswordResetEmail = async (user, resetUrl) => {
 
 // ─── Customer order confirmation ──────────────────────────────────────────────
 export const sendOrderConfirmationEmail = async (user, order) => {
+  if (!isEmailConfigured()) {
+    console.warn('[Email] SMTP not configured — skipping order confirmation email');
+    return;
+  }
   const items = order.items || [];
   const itemRows = items.map((item) => `
     <tr>
@@ -144,7 +203,7 @@ export const sendOrderConfirmationEmail = async (user, order) => {
   `);
 
   await transporter.sendMail({
-    from: `"Jibam Pharmacy" <${process.env.SMTP_USER}>`,
+    from: FROM_ADDRESS,
     to: user.email,
     subject: `Order Confirmed — #${order.orderNumber} | Jibam Pharmacy`,
     html,
@@ -203,7 +262,7 @@ export const sendPharmacistOrderAlert = async (order, customer) => {
   `);
 
   await transporter.sendMail({
-    from: `"Jibam Pharmacy Orders" <${process.env.SMTP_USER}>`,
+    from: FROM_ADDRESS,
     to: pharmacistEmail,
     subject: `🛒 NEW ORDER #${order.orderNumber} — ₦${Number(order.total).toLocaleString()} | Jibam Pharmacy`,
     html,
@@ -231,7 +290,7 @@ export const sendPharmacistPaymentAlert = async (order, customer, channel) => {
   `);
 
   await transporter.sendMail({
-    from: `"Jibam Pharmacy Orders" <${process.env.SMTP_USER}>`,
+    from: FROM_ADDRESS,
     to: pharmacistEmail,
     subject: `✅ PAYMENT CONFIRMED — Order #${order.orderNumber} | ₦${Number(order.total).toLocaleString()}`,
     html,
